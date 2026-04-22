@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  # FlareSolverr - Cloudflare bypass service
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=UTC
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+    networks:
+      - recorder-network
+
+  # GoOnDVR - Stream recorder
+  recorder:
+    build: .
+    container_name: goondvr
+    environment:
+      - FLARESOLVERR_URL=http://flaresolverr:8191/v1
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./videos:/usr/src/app/videos
+      - ./database:/usr/src/app/database
+      - ./conf:/usr/src/app/conf
+    depends_on:
+      - flaresolverr
+    restart: unless-stopped
+    networks:
+      - recorder-network
+
+networks:
+  recorder-network:
+    driver: bridge

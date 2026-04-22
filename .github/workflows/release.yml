@@ -10,7 +10,7 @@
 #
 # Design goals:
 #   • NO separate `process` job — record + convert + upload happen in one job
-#   • NO FlareSolverr service — direct HTTP with cookies only
+#   • FlareSolverr service for Cloudflare bypass (started as Docker container)
 #   • NO polling loops "waiting for artifacts"
 #   • Clean, minimal bash — one concern per step
 #   • Self-healing restart that survives individual job failures
@@ -231,27 +231,68 @@ jobs:
 
       - name: Start FlareSolverr
         run: |
+          echo "Starting FlareSolverr container..."
           docker run -d \
             --name flaresolverr \
+            --restart unless-stopped \
             -p 8191:8191 \
             -e LOG_LEVEL=info \
+            -e LOG_HTML=false \
             -e CAPTCHA_SOLVER=none \
+            -e TZ=UTC \
             ghcr.io/flaresolverr/flaresolverr:latest
-            
-          # Print the logs in the background so they appear in GitHub Actions output
-          docker logs -f flaresolverr &
-
-      - name: Wait for FlareSolverr
-        run: |
-          echo "Waiting for FlareSolverr..."
-          for i in $(seq 1 40); do
-            if curl -s --max-time 5 http://127.0.0.1:8191/ > /dev/null 2>&1; then
-              echo "✓ FlareSolverr ready"
-              exit 0
+          
+          echo "✓ FlareSolverr container started"
+          
+          # Show logs in background for debugging
+          docker logs -f flaresolverr 2>&1 | sed 's/^/[FlareSolverr] /' &
+          LOGS_PID=$!
+          
+          # Wait for FlareSolverr to be ready
+          echo "Waiting for FlareSolverr API..."
+          MAX_WAIT=120  # 2 minutes max
+          ELAPSED=0
+          
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            # Check if container is still running
+            if ! docker ps | grep -q flaresolverr; then
+              echo "::error::FlareSolverr container stopped unexpectedly"
+              docker logs flaresolverr
+              exit 1
             fi
+            
+            # Try to connect to the API
+            if curl -sf --max-time 5 http://127.0.0.1:8191/v1 > /dev/null 2>&1; then
+              echo "✓ FlareSolverr API ready after ${ELAPSED}s"
+              
+              # Test with a simple request
+              TEST_RESP=$(curl -sf --max-time 10 -X POST http://127.0.0.1:8191/v1 \
+                -H "Content-Type: application/json" \
+                -d '{"cmd":"sessions.list"}' 2>&1 || echo "")
+              
+              if echo "$TEST_RESP" | grep -q '"status":"ok"'; then
+                echo "✓ FlareSolverr test request successful"
+                kill $LOGS_PID 2>/dev/null || true
+                exit 0
+              else
+                echo "⚠️  FlareSolverr responding but test failed, retrying..."
+              fi
+            fi
+            
             sleep 3
+            ELAPSED=$((ELAPSED + 3))
+            
+            # Show progress every 15 seconds
+            if [ $((ELAPSED % 15)) -eq 0 ]; then
+              echo "  Still waiting... (${ELAPSED}s / ${MAX_WAIT}s)"
+            fi
           done
-          echo "::warning::FlareSolverr failed to start — Cloudflare bypass may fail"
+          
+          echo "::error::FlareSolverr failed to start within ${MAX_WAIT}s"
+          echo "Container logs:"
+          docker logs flaresolverr
+          kill $LOGS_PID 2>/dev/null || true
+          exit 1
 
       # ── Offline streak ──────────────────────────────────────────────────
       # Tracks consecutive runs with zero recordings.  We use GitHub Actions
@@ -730,6 +771,15 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
           compression-level: 9
+
+      # ── Cleanup FlareSolverr ────────────────────────────────────────────
+      - name: Stop FlareSolverr
+        if: always()
+        run: |
+          echo "Stopping FlareSolverr container..."
+          docker stop flaresolverr 2>/dev/null || true
+          docker rm flaresolverr 2>/dev/null || true
+          echo "✓ FlareSolverr cleaned up"
 
   # ---------------------------------------------------------------------------
   # COMMIT — merge all per-channel DB artifacts and push to repo (serial)
