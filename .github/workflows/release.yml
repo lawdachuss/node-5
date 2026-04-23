@@ -209,7 +209,7 @@ jobs:
       matrix:
         channel: ${{ fromJson(needs.setup.outputs.channels) }}
       fail-fast: false   # one channel failing must not cancel others
-      max-parallel: 10   # FIX: Reduced from 20 to 10 to avoid Docker daemon overload
+      max-parallel: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -241,14 +241,6 @@ jobs:
           go mod download
           go build -ldflags="-s -w" -o goondvr .
           echo "✓ Built: $(./goondvr --version 2>&1 || echo 'ok')"
-
-      # FIX: Added staggered start delay to avoid Docker daemon overload with max-parallel: 20
-      - name: Stagger container starts
-        run: |
-          # Random delay 0-30s to avoid all jobs starting FlareSolverr simultaneously
-          DELAY=$(( RANDOM % 31 ))
-          echo "Staggering start by ${DELAY}s to avoid Docker daemon overload..."
-          sleep "$DELAY"
 
       - name: Start FlareSolverr
         run: |
