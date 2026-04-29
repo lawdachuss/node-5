@@ -91,102 +91,105 @@ type apiResponse struct {
 }
 
 func FetchStream(ctx context.Context, client *internal.Req, username string) (*Stream, error) {
+	// ALWAYS try FlareSolverr first to bypass Cloudflare
+	// This is more reliable than the POST API which is frequently blocked
+	if server.Config.Debug {
+		fmt.Printf("[DEBUG] [%s] Attempting FlareSolverr scraping (primary method)...\n", username)
+	}
+	
+	// Try scraping with FlareSolverr (up to 3 attempts)
+	var hlsURL, status string
+	var scrapeErr error
+	
+	for attempt := 1; attempt <= 3; attempt++ {
+		if server.Config.Debug {
+			fmt.Printf("[DEBUG] [%s] FlareSolverr attempt %d/3...\n", username, attempt)
+		}
+		
+		// Create a context with longer timeout for FlareSolverr
+		attemptCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
+		hlsURL, status, scrapeErr = internal.ScrapeChaturbateStreamWithFlareSolverr(attemptCtx, username)
+		cancel()
+		
+		if scrapeErr == nil {
+			if server.Config.Debug {
+				fmt.Printf("[DEBUG] [%s] FlareSolverr success on attempt %d\n", username, attempt)
+			}
+			break
+		}
+		
+		if server.Config.Debug {
+			fmt.Printf("[DEBUG] [%s] FlareSolverr attempt %d failed: %v\n", username, attempt, scrapeErr)
+		}
+		
+		// Short delay before retry
+		if attempt < 3 {
+			delay := time.Duration(5+attempt*5) * time.Second
+			if server.Config.Debug {
+				fmt.Printf("[DEBUG] [%s] Waiting %v before retry...\n", username, delay)
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+	}
+	
+	// If FlareSolverr succeeded, return the result
+	if scrapeErr == nil {
+		meta := &Stream{}
+		
+		if status == "offline" {
+			if server.Config.Debug {
+				fmt.Printf("[DEBUG] [%s] Channel is offline\n", username)
+			}
+			return meta, internal.ErrChannelOffline
+		}
+		
+		if status == "private" {
+			if server.Config.Debug {
+				fmt.Printf("[DEBUG] [%s] Channel is in private show\n", username)
+			}
+			return meta, internal.ErrPrivateStream
+		}
+		
+		if hlsURL == "" {
+			if server.Config.Debug {
+				fmt.Printf("[DEBUG] [%s] No HLS URL found\n", username)
+			}
+			return meta, internal.ErrChannelOffline
+		}
+		
+		meta.HLSSource = hlsURL
+		if server.Config.Debug {
+			fmt.Printf("[DEBUG] [%s] Successfully got HLS URL: %s\n", username, hlsURL)
+		}
+		return meta, nil
+	}
+	
+	// FlareSolverr failed, try POST API as fallback
+	if server.Config.Debug {
+		fmt.Printf("[DEBUG] [%s] FlareSolverr failed, trying POST API fallback...\n", username)
+	}
+	
 	// Generate CSRF token
 	csrfToken := fmt.Sprintf("%032x", time.Now().UnixNano())
 	
 	// Use the correct POST API
 	body, err := internal.PostChaturbateAPI(ctx, username, csrfToken)
 	if err != nil {
-		// If Cloudflare blocked us, try scraping with FlareSolverr
+		// If Cloudflare blocked us on POST API too, return error
 		if errors.Is(err, internal.ErrCloudflareBlocked) {
 			if server.Config.Debug {
-				fmt.Printf("[DEBUG] Cloudflare block detected, trying FlareSolverr scraping...\n")
+				fmt.Printf("[DEBUG] [%s] POST API also blocked by Cloudflare\n", username)
 			}
-			
-			// Try scraping the public page with retries and different strategies
-			var hlsURL, status string
-			var scrapeErr error
-			
-			for attempt := 1; attempt <= 5; attempt++ {
-				if server.Config.Debug {
-					fmt.Printf("[DEBUG] FlareSolverr attempt %d/5...\n", attempt)
-				}
-				
-				// Create a context with longer timeout for FlareSolverr (independent of recording duration)
-				attemptCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
-				
-				// Try different approaches based on attempt number
-				if attempt <= 3 {
-					// First 3 attempts: Use FlareSolverr with sessions
-					hlsURL, status, scrapeErr = internal.ScrapeChaturbateStreamWithFlareSolverr(attemptCtx, username)
-				} else {
-					// Last 2 attempts: Try direct scraping (might work if CF protection is lighter)
-					if server.Config.Debug {
-						fmt.Printf("[DEBUG] Switching to direct scraping for attempt %d\n", attempt)
-					}
-					hlsURL, status, scrapeErr = internal.ScrapeChaturbateStream(attemptCtx, username)
-				}
-				cancel()
-				
-				if scrapeErr == nil {
-					break
-				}
-				
-				if server.Config.Debug {
-					fmt.Printf("[DEBUG] FlareSolverr attempt %d failed: %v\n", attempt, scrapeErr)
-				}
-				
-				// Exponential backoff with jitter to avoid FlareSolverr congestion
-				if attempt < 5 {
-					baseDelay := time.Duration(15+attempt*15) * time.Second
-					jitter := time.Duration(attempt*5) * time.Second
-					delay := baseDelay + jitter
-					if server.Config.Debug {
-						nextMethod := "FlareSolverr"
-						if attempt >= 3 {
-							nextMethod = "direct scraping"
-						}
-						fmt.Printf("[DEBUG] Waiting %v before retry (attempt %d will use %s)...\n", 
-							delay, attempt+1, nextMethod)
-					}
-					
-					// Check if context is cancelled during wait
-					select {
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					case <-time.After(delay):
-					}
-				}
-			}
-			
-			if scrapeErr != nil {
-				if server.Config.Debug {
-					fmt.Printf("[DEBUG] All FlareSolverr attempts failed, returning Cloudflare error\n")
-				}
-				return nil, fmt.Errorf("failed to get stream info: %w", err)
-			}
-			
-			meta := &Stream{}
-			
-			if status == "offline" {
-				return meta, internal.ErrChannelOffline
-			}
-			
-			if status == "private" {
-				return meta, internal.ErrPrivateStream
-			}
-			
-			if hlsURL == "" {
-				return meta, internal.ErrChannelOffline
-			}
-			
-			meta.HLSSource = hlsURL
-			if server.Config.Debug {
-				fmt.Printf("[DEBUG] Successfully scraped HLS URL: %s\n", hlsURL)
-			}
-			return meta, nil
+			return nil, fmt.Errorf("both FlareSolverr and POST API blocked: %w", err)
 		}
 		
+		if server.Config.Debug {
+			fmt.Printf("[DEBUG] [%s] POST API error: %v\n", username, err)
+		}
 		return nil, fmt.Errorf("failed to get stream info: %w", err)
 	}
 	
