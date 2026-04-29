@@ -36,12 +36,15 @@ jobs:
         run: |
           tar -czf deploy.tar.gz \
             --exclude='.git' \
-            --exclude='videos/*' \
-            --exclude='database/*' \
+            --exclude='videos' \
+            --exclude='database' \
             --exclude='*.exe' \
             --exclude='node_modules' \
             --exclude='.github' \
             --exclude='aws-secrets' \
+            --exclude='run_logs.txt' \
+            --exclude='*.log' \
+            --warning=no-file-changed \
             .
 
       - name: Upload to EC2
