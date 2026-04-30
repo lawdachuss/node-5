@@ -91,85 +91,53 @@ type apiResponse struct {
 }
 
 func FetchStream(ctx context.Context, client *internal.Req, username string) (*Stream, error) {
-	// ALWAYS try FlareSolverr first to bypass Cloudflare
-	// This is more reliable than the POST API which is frequently blocked
+	// Try POST API first (faster, doesn't require FlareSolverr)
+	// Only use FlareSolverr if POST API is blocked by Cloudflare
 	if server.Config.Debug {
-		fmt.Printf("[DEBUG] [%s] Attempting FlareSolverr scraping (primary method)...\n", username)
-	}
-	
-	// Try scraping with FlareSolverr (only 1 attempt with shorter timeout)
-	// If it fails, quickly fall back to POST API
-	var hlsURL, status string
-	var scrapeErr error
-	
-	if server.Config.Debug {
-		fmt.Printf("[DEBUG] [%s] FlareSolverr attempt 1/1...\n", username)
-	}
-	
-	// Create a context with 60-second timeout for FlareSolverr (reduced from 180s)
-	attemptCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	hlsURL, status, scrapeErr = internal.ScrapeChaturbateStreamWithFlareSolverr(attemptCtx, username)
-	cancel()
-	
-	if scrapeErr == nil {
-		if server.Config.Debug {
-			fmt.Printf("[DEBUG] [%s] FlareSolverr success\n", username)
-		}
-	} else {
-		if server.Config.Debug {
-			fmt.Printf("[DEBUG] [%s] FlareSolverr failed: %v\n", username, scrapeErr)
-		}
-	}
-	
-	// If FlareSolverr succeeded, return the result
-	if scrapeErr == nil {
-		meta := &Stream{}
-		
-		if status == "offline" {
-			if server.Config.Debug {
-				fmt.Printf("[DEBUG] [%s] Channel is offline\n", username)
-			}
-			return meta, internal.ErrChannelOffline
-		}
-		
-		if status == "private" {
-			if server.Config.Debug {
-				fmt.Printf("[DEBUG] [%s] Channel is in private show\n", username)
-			}
-			return meta, internal.ErrPrivateStream
-		}
-		
-		if hlsURL == "" {
-			if server.Config.Debug {
-				fmt.Printf("[DEBUG] [%s] No HLS URL found\n", username)
-			}
-			return meta, internal.ErrChannelOffline
-		}
-		
-		meta.HLSSource = hlsURL
-		if server.Config.Debug {
-			fmt.Printf("[DEBUG] [%s] Successfully got HLS URL: %s\n", username, hlsURL)
-		}
-		return meta, nil
-	}
-	
-	// FlareSolverr failed, try POST API as fallback
-	if server.Config.Debug {
-		fmt.Printf("[DEBUG] [%s] FlareSolverr failed, trying POST API fallback...\n", username)
+		fmt.Printf("[DEBUG] [%s] Attempting POST API (primary method)...\n", username)
 	}
 	
 	// Generate CSRF token
 	csrfToken := fmt.Sprintf("%032x", time.Now().UnixNano())
 	
-	// Use the correct POST API
+	// Use the POST API
 	body, err := internal.PostChaturbateAPI(ctx, username, csrfToken)
 	if err != nil {
-		// If Cloudflare blocked us on POST API too, return error
+		// If Cloudflare blocked us, try FlareSolverr as fallback
 		if errors.Is(err, internal.ErrCloudflareBlocked) {
 			if server.Config.Debug {
-				fmt.Printf("[DEBUG] [%s] POST API also blocked by Cloudflare\n", username)
+				fmt.Printf("[DEBUG] [%s] POST API blocked by Cloudflare, trying FlareSolverr fallback...\n", username)
 			}
-			return nil, fmt.Errorf("both FlareSolverr and POST API blocked: %w", err)
+			
+			// Try FlareSolverr with extended timeout to handle Cloudflare challenges
+			// Match the BROWSER_TIMEOUT (240s) + 10s buffer for network overhead
+			attemptCtx, cancel := context.WithTimeout(ctx, 250*time.Second)
+			hlsURL, status, scrapeErr := internal.ScrapeChaturbateStreamWithFlareSolverr(attemptCtx, username)
+			cancel()
+			
+			if scrapeErr != nil {
+				if server.Config.Debug {
+					fmt.Printf("[DEBUG] [%s] FlareSolverr also failed: %v\n", username, scrapeErr)
+				}
+				return nil, fmt.Errorf("both POST API and FlareSolverr blocked: %w", err)
+			}
+			
+			// FlareSolverr succeeded
+			meta := &Stream{}
+			
+			if status == "offline" || hlsURL == "" {
+				return meta, internal.ErrChannelOffline
+			}
+			
+			if status == "private" {
+				return meta, internal.ErrPrivateStream
+			}
+			
+			meta.HLSSource = hlsURL
+			if server.Config.Debug {
+				fmt.Printf("[DEBUG] [%s] FlareSolverr success, got HLS URL: %s\n", username, hlsURL)
+			}
+			return meta, nil
 		}
 		
 		if server.Config.Debug {

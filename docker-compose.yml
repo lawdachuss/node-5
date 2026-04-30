@@ -11,7 +11,7 @@ services:
       - CAPTCHA_SOLVER=none
       - TZ=UTC
       - HEADLESS=true
-      - BROWSER_TIMEOUT=40000
+      - BROWSER_TIMEOUT=240000
       - TEST_URL=https://www.google.com
     ports:
       - "8191:8191"
@@ -35,7 +35,7 @@ services:
       - CAPTCHA_SOLVER=none
       - TZ=UTC
       - HEADLESS=true
-      - BROWSER_TIMEOUT=40000
+      - BROWSER_TIMEOUT=240000
       - TEST_URL=https://www.google.com
     ports:
       - "8192:8191"
@@ -59,7 +59,7 @@ services:
       - CAPTCHA_SOLVER=none
       - TZ=UTC
       - HEADLESS=true
-      - BROWSER_TIMEOUT=40000
+      - BROWSER_TIMEOUT=240000
       - TEST_URL=https://www.google.com
     ports:
       - "8193:8191"
@@ -83,7 +83,7 @@ services:
       - CAPTCHA_SOLVER=none
       - TZ=UTC
       - HEADLESS=true
-      - BROWSER_TIMEOUT=40000
+      - BROWSER_TIMEOUT=240000
       - TEST_URL=https://www.google.com
     ports:
       - "8194:8191"
@@ -107,7 +107,7 @@ services:
       - CAPTCHA_SOLVER=none
       - TZ=UTC
       - HEADLESS=true
-      - BROWSER_TIMEOUT=40000
+      - BROWSER_TIMEOUT=240000
       - TEST_URL=https://www.google.com
     ports:
       - "8195:8191"
