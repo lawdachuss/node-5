@@ -40,6 +40,9 @@ jobs:
           mkdir -p videos/completed
           mkdir -p database
           mkdir -p conf
+          
+          echo "💾 Initial disk space:"
+          df -h /
       
       - name: Create settings.json from secrets
         run: |
@@ -173,6 +176,7 @@ jobs:
           # Monitor for 5 hours
           END_TIME=$(($(date +%s) + 18000))  # 5 hours = 18000 seconds
           LAST_URL_DISPLAY=0
+          LAST_CLEANUP=0
           
           while [ $(date +%s) -lt $END_TIME ]; do
             CURRENT_TIME=$(date +%s)
@@ -188,6 +192,17 @@ jobs:
               fi
             fi
             
+            # Cleanup uploaded videos every 10 minutes to save disk space
+            if [ $((CURRENT_TIME - LAST_CLEANUP)) -gt 600 ]; then
+              DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+              if [ "$DISK_USAGE" -gt 70 ]; then
+                echo "🧹 Disk usage at ${DISK_USAGE}% - Cleaning up completed videos..."
+                find videos/completed -type f \( -name "*.mp4" -o -name "*.ts" \) -mmin +5 -delete 2>/dev/null || true
+                echo "✅ Cleanup completed"
+              fi
+              LAST_CLEANUP=$CURRENT_TIME
+            fi
+            
             # Show status every 30 minutes
             REMAINING=$((END_TIME - CURRENT_TIME))
             if [ $((REMAINING % 1800)) -lt 60 ] && [ $((CURRENT_TIME - LAST_URL_DISPLAY)) -gt 1700 ]; then
@@ -195,6 +210,9 @@ jobs:
               MINUTES=$(((REMAINING % 3600) / 60))
               echo ""
               echo "⏰ Time remaining: ${HOURS}h ${MINUTES}m"
+              
+              # Show disk usage
+              echo "💾 Disk usage: $(df -h / | awk 'NR==2 {print $3 " / " $2 " (" $5 ")"}')"
               
               # Try to get and show tunnel URL
               TUNNEL_URL=$(grep -oP 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' tunnel.log | head -1)
@@ -224,6 +242,16 @@ jobs:
           if [ -f tunnel.pid ]; then
             kill $(cat tunnel.pid) 2>/dev/null || true
           fi
+      
+      - name: Final cleanup of videos
+        if: always()
+        run: |
+          echo "🧹 Final cleanup - removing all local videos..."
+          find videos -type f \( -name "*.mp4" -o -name "*.ts" \) -delete 2>/dev/null || true
+          echo "✅ All videos cleaned up (they're already uploaded to GoFile/etc)"
+          echo ""
+          echo "💾 Final disk usage:"
+          df -h /
       
       - name: Show session logs
         if: always()
