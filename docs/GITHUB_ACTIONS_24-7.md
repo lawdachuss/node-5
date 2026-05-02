@@ -1,13 +1,15 @@
-# GitHub Actions 24/7 Setup Guide
+# GitHub Actions 24/7 Setup Guide (with Web UI Access!)
 
 ## Overview
 
-This setup runs your recorder continuously 24/7 using GitHub Actions with 5-hour intervals.
+This setup runs your recorder continuously 24/7 using GitHub Actions with 5-hour intervals, **and gives you a public web UI** accessible from anywhere via Cloudflare Tunnel!
 
 ## How It Works
 
 - **5 scheduled runs per day** (every 5 hours): 00:00, 05:00, 10:00, 15:00, 20:00 UTC
 - Each run lasts **5 hours** (300 minutes)
+- **Web UI accessible via Cloudflare Tunnel** (free, no signup needed)
+- **Public URL** generated each run (e.g., `https://random-name.trycloudflare.com`)
 - Automatic restart after each session
 - **Zero downtime** between runs
 
@@ -61,11 +63,34 @@ git push origin main
 4. Find **"Continuous Recording (24/7)"** workflow
 5. Click **"Run workflow"** to start immediately (optional)
 
-### 4. Monitor
+### 4. Monitor & Access Web UI
 
-- Go to **Actions** tab to see running workflows
-- Each run shows live logs
-- Recordings are uploaded as artifacts (kept for 1 day)
+1. Go to **Actions** tab
+2. Click on the running workflow
+3. Open the **"Start Cloudflare Tunnel"** step
+4. **Copy the public URL** (looks like `https://xyz-abc-123.trycloudflare.com`)
+5. **Open that URL in your browser** - you'll see your dashboard!
+
+The URL is:
+- ✅ **Public** - accessible from any device
+- ✅ **Secure** - HTTPS encrypted
+- ✅ **Free** - no Cloudflare account needed
+- ⏰ **Valid for 5 hours** - new URL generated each run
+
+**Example:**
+```
+╔════════════════════════════════════════════════════════════╗
+║                    🌐 WEB UI ACCESS                        ║
+╚════════════════════════════════════════════════════════════╝
+
+✅ Your dashboard is now accessible at:
+
+   https://random-name-1234.trycloudflare.com
+
+📱 This URL is public and works from anywhere!
+⏰ Valid for 5 hours (until workflow ends)
+🔄 New URL will be generated on next run
+```
 
 ## Schedule Details
 
@@ -81,6 +106,8 @@ git push origin main
 
 ## Features
 
+✅ **Web UI accessible from anywhere** via Cloudflare Tunnel
+✅ Public HTTPS URL (no VPN or port forwarding needed)
 ✅ Automatic restart every 5 hours
 ✅ No manual intervention needed
 ✅ Recordings uploaded to configured hosts
