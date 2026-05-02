@@ -35,14 +35,11 @@ jobs:
           df -h /
       
       - name: Create settings.json from secrets
+        env:
+          SETTINGS_CONTENT: ${{ secrets.SETTINGS_JSON }}
         run: |
           echo "📋 Creating settings.json..."
-          if [ -n "${{ secrets.SETTINGS_JSON }}" ]; then
-            cat > settings.json <<'SETTINGSEOF'
-          ${{ secrets.SETTINGS_JSON }}
-          SETTINGSEOF
-            echo "✅ settings.json created from secret"
-          else
+          if [ -z "$SETTINGS_CONTENT" ]; then
             echo "❌ SETTINGS_JSON secret not found!"
             echo ""
             echo "Please add SETTINGS_JSON secret in GitHub repository settings:"
@@ -53,21 +50,24 @@ jobs:
             echo ""
             exit 1
           fi
+          
+          echo "$SETTINGS_CONTENT" > settings.json
+          echo "✅ settings.json created from secret"
       
       - name: Create channels.json from secrets (if exists)
+        env:
+          CHANNELS_CONTENT: ${{ secrets.CHANNELS_JSON }}
         run: |
           echo "📋 Creating channels.json..."
-          if [ -n "${{ secrets.CHANNELS_JSON }}" ]; then
-            cat > conf/channels.json <<'CHANNELSEOF'
-          ${{ secrets.CHANNELS_JSON }}
-          CHANNELSEOF
-            echo "✅ channels.json created from secret"
-            echo "📊 Channel count: $(jq '. | length' conf/channels.json)"
-            echo "📺 Active channels: $(jq '[.[] | select(.is_paused == false)] | length' conf/channels.json)"
-          else
+          if [ -z "$CHANNELS_CONTENT" ]; then
             echo "⚠️ CHANNELS_JSON secret not found"
             echo "Creating empty channels file - you can add channels via Web UI"
             echo "[]" > conf/channels.json
+          else
+            echo "$CHANNELS_CONTENT" > conf/channels.json
+            echo "✅ channels.json created from secret"
+            echo "📊 Channel count: $(jq '. | length' conf/channels.json)"
+            echo "📺 Active channels: $(jq '[.[] | select(.is_paused == false)] | length' conf/channels.json)"
           fi
       
       - name: Set up Docker Buildx
