@@ -153,6 +153,28 @@ func LiveThumbProxy(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, imgBytes)
 }
 
+// VideoThumbnailProxy proxies video thumbnails from external hosts (like Pixhost)
+// to avoid CORS and hotlinking protection issues.
+func VideoThumbnailProxy(c *gin.Context) {
+	imgURL := c.Query("url")
+	if imgURL == "" {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	// Create a request with appropriate headers to bypass hotlinking protection
+	req := internal.NewMediaReq()
+	imgBytes, err := req.GetBytes(c.Request.Context(), imgURL)
+	if err != nil {
+		log.Printf("Failed to fetch thumbnail from %s: %v", imgURL, err)
+		c.Status(http.StatusBadGateway)
+		return
+	}
+
+	contentType := http.DetectContentType(imgBytes)
+	c.Data(http.StatusOK, contentType, imgBytes)
+}
+
 // Updates handles the SSE connection for updates.
 func Updates(c *gin.Context) {
 	server.Manager.Subscriber(c.Writer, c.Request)

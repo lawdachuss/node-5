@@ -98,6 +98,7 @@ func SetupViews(r *gin.Engine) {
 	r.GET("/updates", Updates)
 	r.GET("/thumb/:channelID", ThumbProxy)
 	r.GET("/live-thumb/:channelID", LiveThumbProxy)
+	r.GET("/video-thumb-proxy", VideoThumbnailProxy)
 	r.POST("/update_config", UpdateConfig)
 	r.POST("/create_channel", CreateChannel)
 	r.POST("/stop_channel/:channelID", StopChannel)
