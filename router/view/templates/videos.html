@@ -331,17 +331,34 @@
                                     
                                     return `
                                         <div class="video-item">
-                                            ${hasThumbnail ? `
-                                                <div style="flex-shrink: 0;">
-                                                    <img src="${thumbnailUrl}" alt="Thumbnail" style="
+                                            <div style="flex-shrink: 0;">
+                                                ${hasThumbnail ? `
+                                                    <img src="${thumbnailUrl}" alt="Thumbnail" 
+                                                         style="
+                                                            width: 160px;
+                                                            height: 90px;
+                                                            object-fit: cover;
+                                                            border-radius: 8px;
+                                                            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                                                            background: rgba(0,0,0,0.3);
+                                                         " 
+                                                         onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22160%22 height=%2290%22%3E%3Crect fill=%22%23667eea%22 width=%22160%22 height=%2290%22/%3E%3Ctext fill=%22white%22 font-family=%22Arial%22 font-size=%2214%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Thumbnail%3C/text%3E%3C/svg%3E';" 
+                                                         loading="lazy" />
+                                                ` : `
+                                                    <div style="
                                                         width: 160px;
                                                         height: 90px;
-                                                        object-fit: cover;
                                                         border-radius: 8px;
+                                                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                                        display: flex;
+                                                        align-items: center;
+                                                        justify-content: center;
                                                         box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                                                    " onerror="this.parentElement.style.display='none'" />
-                                                </div>
-                                            ` : ''}
+                                                    ">
+                                                        <span class="ts-icon is-film-icon" style="font-size: 2rem; color: rgba(255,255,255,0.7);"></span>
+                                                    </div>
+                                                `}
+                                            </div>
                                             <div style="flex: 1; min-width: 0;">
                                                 <div class="ts-text is-bold" style="margin-bottom: 0.25rem;">${v.filename || 'Unknown Filename'}</div>
                                                 <div class="ts-text is-small is-description" style="margin-bottom: 0.75rem;">Recorded on: ${dateStr}</div>
