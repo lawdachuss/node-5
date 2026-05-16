@@ -54,6 +54,9 @@ jobs:
 
           mkdir -p videos conf database emergency-backup
 
+          # Install jq for JSON parsing
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
           echo "Workspace: $GITHUB_WORKSPACE"
           echo "Disk space:"
           df -h /
@@ -95,6 +98,35 @@ jobs:
           echo "Running services:"
           docker compose ps
 
+      - name: Wait for Byparr to be ready
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for Byparr to start..."
+          for attempt in {1..30}; do
+            if curl -fsS --max-time 5 http://localhost:8191/ >/dev/null 2>&1; then
+              echo "Byparr is ready."
+              break
+            fi
+            sleep 2
+          done
+
+          echo "Getting Cloudflare cookies via Byparr (this may take 2-3 minutes)..."
+          RESPONSE=$(curl -sS --fail --max-time 240 -X POST http://localhost:8191/v1 \
+            -H 'Content-Type: application/json' \
+            -d '{"cmd":"request.get","url":"https://chaturbate.com","maxTimeout":180000}' || echo '{}')
+
+          CF_COOKIE=$(echo "$RESPONSE" | jq -r '.solution.cookies[]? | select(.name=="cf_clearance") | .name + "=" + .value' 2>/dev/null || echo "")
+          
+          if [[ -n "$CF_COOKIE" ]]; then
+            echo "Successfully obtained cf_clearance cookie"
+            echo "CF_COOKIE=$CF_COOKIE" >> "$GITHUB_ENV"
+          else
+            echo "Warning: Could not get cf_clearance cookie from Byparr"
+            echo "Recorder may face Cloudflare blocks"
+          fi
+
       - name: Wait for web UI
         shell: bash
         run: |
@@ -103,6 +135,15 @@ jobs:
           for attempt in {1..45}; do
             if curl -fsS --max-time 5 "$APP_URL" >/dev/null; then
               echo "Web UI is ready."
+              
+              # Push Cloudflare cookie to recorder if we got one
+              if [[ -n "${CF_COOKIE:-}" ]]; then
+                echo "Pushing cf_clearance cookie to recorder..."
+                curl -sS --max-time 10 -X POST http://localhost:8080/update_config \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"cookies\":\"${CF_COOKIE}\"}" || echo "Warning: Could not push cookie to recorder"
+              fi
+              
               exit 0
             fi
 
