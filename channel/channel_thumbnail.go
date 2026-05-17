@@ -80,35 +80,8 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					errFn("thumb: could not write sidecar for %s: %v", baseName, writeErr)
 				}
 			}
-			// If configured to delete local files after upload, push the
-			// thumbnail to a remote image host and write the remote URL
-			// into the sidecar. Otherwise, write a local preview URL.
 			if server.Config != nil && server.Config.DeleteLocalAfterUpload {
-				imgUploader := uploader.NewMultiImageUploader()
-				url, host, uerr := imgUploader.Upload(thumbJPG)
-				if uerr == nil {
-					if writeErr := os.WriteFile(thumbSidecar, []byte(url), 0644); writeErr == nil {
-						info("thumb: uploaded %s to %s", baseName, host)
-						_ = os.Remove(thumbJPG)
-					} else {
-						errFn("thumb: could not write sidecar for %s: %v", baseName, writeErr)
-					}
-				} else {
-					// Fallback to local URL sidecar if upload fails
-					localURL := "/thumb?path=" + videoPath
-					if writeErr := os.WriteFile(thumbSidecar, []byte(localURL), 0644); writeErr == nil {
-						info("thumb: saved thumbnail for %s (local fallback)", baseName)
-					} else {
-						errFn("thumb: could not write sidecar for %s: %v", baseName, writeErr)
-					}
-				}
-			} else {
-				localURL := "/thumb?path=" + videoPath
-				if writeErr := os.WriteFile(thumbSidecar, []byte(localURL), 0644); writeErr == nil {
-					info("thumb: saved thumbnail for %s", baseName)
-				} else {
-					errFn("thumb: could not write sidecar for %s: %v", baseName, writeErr)
-				}
+				_ = os.Remove(thumbJPG)
 			}
 		}
 	}
@@ -202,30 +175,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					}
 				}
 				if server.Config != nil && server.Config.DeleteLocalAfterUpload {
-					imgUploader := uploader.NewMultiImageUploader()
-					url, host, uerr := imgUploader.Upload(spriteJPG)
-					if uerr == nil {
-						if writeErr := os.WriteFile(spriteSidecar, []byte(url), 0644); writeErr == nil {
-							info("thumb: uploaded sprite for %s to %s", baseName, host)
-							_ = os.Remove(spriteJPG)
-						} else {
-							errFn("thumb: could not write sprite sidecar for %s: %v", baseName, writeErr)
-						}
-					} else {
-						localURL := "/sprite?path=" + videoPath
-						if writeErr := os.WriteFile(spriteSidecar, []byte(localURL), 0644); writeErr == nil {
-							info("thumb: saved sprite for %s (local fallback)", baseName)
-						} else {
-							errFn("thumb: could not write sprite sidecar for %s: %v", baseName, writeErr)
-						}
-					}
-				} else {
-					localURL := "/sprite?path=" + videoPath
-					if writeErr := os.WriteFile(spriteSidecar, []byte(localURL), 0644); writeErr == nil {
-						info("thumb: saved sprite for %s", baseName)
-					} else {
-						errFn("thumb: could not write sprite sidecar for %s: %v", baseName, writeErr)
-					}
+					_ = os.Remove(spriteJPG)
 				}
 			}
 		}

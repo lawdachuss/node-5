@@ -635,9 +635,7 @@ func videoURLForHostLink(host, link string) string {
                 return link
         case strings.Contains(normalizedHost, "sendcm") || strings.Contains(normalizedLink, "send.now/"):
                 return link
-        case strings.Contains(normalizedHost, "gofile") || strings.Contains(normalizedLink, "gofile.io/"):
-                return link
-        case strings.Contains(normalizedHost, "turboviplay") || strings.Contains(normalizedLink, "emturbovid.com/") || strings.Contains(normalizedLink, "turboviplay.com/"):
+		case strings.Contains(normalizedHost, "turboviplay") || strings.Contains(normalizedLink, "emturbovid.com/") || strings.Contains(normalizedLink, "turboviplay.com/"):
                 return link
         default:
                 return ""
