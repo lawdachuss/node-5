@@ -73,7 +73,7 @@ func (m *Manager) StartCookieRefresher() {
                         if ok := m.refreshCookiesOnce(); ok {
                                 time.Sleep(30 * time.Minute)
                         } else {
-                                time.Sleep(30 * time.Second)
+                                time.Sleep(15 * time.Second)
                         }
                 }
         }()
