@@ -49,3 +49,7 @@ build = ["bash", "-c", "npm ci && npm run build:css && go build -o chaturbate-dv
 
 [userenv.shared]
 SUPABASE_URL = "https://oennipbsnxlvcyvlufqk.supabase.co"
+SUPABASE_DB_HOST = "aws-0-us-east-1.pooler.supabase.com"
+SUPABASE_DB_PORT = "6543"
+SUPABASE_DB_USER = "postgres.oennipbsnxlvcyvlufqk"
+SUPABASE_DB_NAME = "postgres"
