@@ -298,18 +298,6 @@ jobs:
             exit 1
           fi
 
-          last_heartbeat=0
-          heartbeats_enabled=false
-          if curl -sfS --max-time 5 "${SUPABASE_URL}/rest/v1/heartbeats?select=id&limit=1" \
-            -H "apikey: ${SUPABASE_API_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_API_KEY}" \
-            >/dev/null 2>/dev/null; then
-            heartbeats_enabled=true
-            echo "Heartbeats enabled (Supabase 'heartbeats' table exists)"
-          else
-            echo "Heartbeats disabled — run supabase/migrations/001_add_tunnel_tracking.sql in Supabase SQL Editor to enable"
-          fi
-
           stop_recorder() {
             echo "Stopping recorder gracefully."
             docker compose stop -t 300 chaturbate-dvr || true
@@ -332,18 +320,6 @@ jobs:
                 fi
                 sleep 2
               done
-            fi
-
-            now="$(date +%s)"
-            if $heartbeats_enabled && (( now - last_heartbeat >= 300 )); then
-              curl -fsS -X POST "${SUPABASE_URL}/rest/v1/heartbeats" \
-                -H "apikey: ${SUPABASE_API_KEY}" \
-                -H "Authorization: Bearer ${SUPABASE_API_KEY}" \
-                -H "Content-Type: application/json" \
-                -H "Prefer: return=minimal" \
-                -d "{\"run_id\": ${GITHUB_RUN_NUMBER}, \"timestamp\": \"$(date -u +%FT%TZ)\", \"tunnel_url\": \"${TUNNEL_URL:-}\"}" \
-                >/dev/null 2>/dev/null || true
-              last_heartbeat="$now"
             fi
 
             sleep 60

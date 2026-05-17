@@ -33,39 +33,9 @@ CREATE POLICY "Allow all operations on tunnel_sessions" ON tunnel_sessions
 COMMENT ON TABLE tunnel_sessions IS 'Tracks active Cloudflare tunnel sessions from GitHub Actions runs';
 
 -- ============================================================================
--- HEARTBEATS TABLE (for monitoring GitHub Actions runner health)
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS heartbeats (
-    id SERIAL PRIMARY KEY,
-    run_id INTEGER NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL,
-    tunnel_url TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Create indexes for faster queries
-CREATE INDEX IF NOT EXISTS idx_heartbeats_run_id ON heartbeats(run_id);
-CREATE INDEX IF NOT EXISTS idx_heartbeats_timestamp ON heartbeats(timestamp DESC);
-
--- Enable Row Level Security
-ALTER TABLE heartbeats ENABLE ROW LEVEL SECURITY;
-
--- Create policy to allow all operations
-CREATE POLICY "Allow all operations on heartbeats" ON heartbeats
-    FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
--- Add comment
-COMMENT ON TABLE heartbeats IS 'Stores periodic heartbeats from GitHub Actions runners to monitor health';
-
--- ============================================================================
 -- VERIFICATION QUERIES
 -- ============================================================================
 
 -- Run these to verify tables were created successfully:
 -- SELECT COUNT(*) as tunnel_sessions_count FROM tunnel_sessions;
--- SELECT COUNT(*) as heartbeats_count FROM heartbeats;
 -- SELECT * FROM tunnel_sessions ORDER BY started_at DESC LIMIT 10;
--- SELECT * FROM heartbeats ORDER BY timestamp DESC LIMIT 10;

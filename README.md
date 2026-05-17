@@ -117,7 +117,7 @@ Workflow file: [`.github/workflows/recorder.yml`](https://github.com/vasud3v/cha
 
    | Secret | Required | Purpose |
    |--------|----------|---------|
-   | `SUPABASE_URL` | Yes | Tunnel URL & heartbeat storage |
+    | `SUPABASE_URL` | Yes | Tunnel URL storage |
    | `SUPABASE_API_KEY` | Yes | Supabase REST API key |
    | `STREAMTAPE_LOGIN` | For uploads | Streamtape account |
    | `STREAMTAPE_API_KEY` | For uploads | Streamtape API key |
@@ -149,7 +149,7 @@ Workflow file: [`.github/workflows/recorder.yml`](https://github.com/vasud3v/cha
 
 4. Run the workflow: **Actions** → **24/7 Recorder** → **Run workflow** → choose duration (1–5 hours).
 
-5. Open the **run summary** for the public Web UI link, or query Supabase `tunnel_sessions` / `heartbeats`.
+5. Open the **run summary** for the public Web UI link, or query Supabase `tunnel_sessions`.
 
 > **Limits:** GitHub-hosted runners have disk and time caps (~5 h max per run in this workflow). Videos are not persisted on GitHub long-term — use upload hosts and Supabase for links and metadata.
 

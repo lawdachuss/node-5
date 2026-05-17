@@ -136,27 +136,6 @@ ORDER BY started_at DESC
 LIMIT 1;
 
 -- ============================================================================
--- 5. HEARTBEATS TABLE (GitHub Actions runner monitoring)
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS heartbeats (
-    id SERIAL PRIMARY KEY,
-    run_id INTEGER NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL,
-    tunnel_url TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_heartbeats_run_id ON heartbeats(run_id);
-CREATE INDEX IF NOT EXISTS idx_heartbeats_timestamp ON heartbeats(timestamp DESC);
-
-ALTER TABLE heartbeats ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all operations on heartbeats" ON heartbeats
-    FOR ALL USING (true) WITH CHECK (true);
-
-COMMENT ON TABLE heartbeats IS 'Stores periodic heartbeats from GitHub Actions runners to monitor health';
-
--- ============================================================================
 -- VERIFICATION
 -- ============================================================================
 
@@ -164,5 +143,4 @@ COMMENT ON TABLE heartbeats IS 'Stores periodic heartbeats from GitHub Actions r
 -- SELECT 'video_uploads' AS table_name, COUNT(*) AS row_count FROM video_uploads
 -- UNION ALL SELECT 'channels', COUNT(*) FROM channels
 -- UNION ALL SELECT 'app_settings', COUNT(*) FROM app_settings
--- UNION ALL SELECT 'tunnel_sessions', COUNT(*) FROM tunnel_sessions
--- UNION ALL SELECT 'heartbeats', COUNT(*) FROM heartbeats;
+-- UNION ALL SELECT 'tunnel_sessions', COUNT(*) FROM tunnel_sessions;
