@@ -1,28 +1,6 @@
 [
   {
     "is_paused": false,
-    "username": "artoftease",
-    "framerate": 30,
-    "resolution": 1080,
-    "pattern": "videos/{{.Username}}_{{.Year}}-{{.Month}}-{{.Day}}_{{.Hour}}-{{.Minute}}-{{.Second}}{{if .Sequence}}_{{.Sequence}}{{end}}",
-    "max_duration": 0,
-    "max_filesize": 0,
-    "compress": true,
-    "created_at": 1778957456
-  },
-  {
-    "is_paused": false,
-    "username": "golden_girl_house",
-    "framerate": 30,
-    "resolution": 1080,
-    "pattern": "videos/{{.Username}}_{{.Year}}-{{.Month}}-{{.Day}}_{{.Hour}}-{{.Minute}}-{{.Second}}{{if .Sequence}}_{{.Sequence}}{{end}}",
-    "max_duration": 0,
-    "max_filesize": 0,
-    "compress": true,
-    "created_at": 1778965544
-  },
-  {
-    "is_paused": false,
     "username": "indulgencex",
     "framerate": 30,
     "resolution": 1080,
@@ -42,5 +20,27 @@
     "max_filesize": 0,
     "compress": true,
     "created_at": 1778957185
+  },
+  {
+    "is_paused": false,
+    "username": "artoftease",
+    "framerate": 30,
+    "resolution": 1080,
+    "pattern": "videos/{{.Username}}_{{.Year}}-{{.Month}}-{{.Day}}_{{.Hour}}-{{.Minute}}-{{.Second}}{{if .Sequence}}_{{.Sequence}}{{end}}",
+    "max_duration": 0,
+    "max_filesize": 0,
+    "compress": true,
+    "created_at": 1778957456
+  },
+  {
+    "is_paused": false,
+    "username": "golden_girl_house",
+    "framerate": 30,
+    "resolution": 1080,
+    "pattern": "videos/{{.Username}}_{{.Year}}-{{.Month}}-{{.Day}}_{{.Hour}}-{{.Minute}}-{{.Second}}{{if .Sequence}}_{{.Sequence}}{{end}}",
+    "max_duration": 0,
+    "max_filesize": 0,
+    "compress": true,
+    "created_at": 1778965544
   }
 ]

@@ -41,7 +41,7 @@ func New() (*Manager, error) {
         }, nil
 }
 
-// SaveConfig saves the current channels and state to a JSON file.
+// SaveConfig saves the current channels to channels.json and to PostgreSQL.
 func (m *Manager) SaveConfig() error {
         var config []*entity.ChannelConfig
 
@@ -59,6 +59,9 @@ func (m *Manager) SaveConfig() error {
         }
         if err := os.WriteFile("./conf/channels.json", b, 0777); err != nil {
                 return fmt.Errorf("write file: %w", err)
+        }
+        if err := server.SaveChannelsToDB(b); err != nil {
+                fmt.Printf("[WARN] [db] could not save channels to database: %v\n", err)
         }
         return nil
 }
@@ -106,7 +109,7 @@ func (m *Manager) refreshCookiesOnce() {
         }
 }
 
-// LoadConfig loads the channels from JSON and starts them.
+// LoadConfig loads the channels from JSON (or PostgreSQL fallback) and starts them.
 // All channels are automatically resumed on startup, regardless of their paused state.
 func (m *Manager) LoadConfig() error {
         // Restore persisted cookies/user-agent before starting channels
@@ -116,11 +119,21 @@ func (m *Manager) LoadConfig() error {
                 fmt.Println(" INFO loaded persisted cookies from conf/settings.json")
         }
 
+        // Connect to database (non-fatal if unavailable)
+        if err := server.InitDB(); err != nil {
+                fmt.Printf("[WARN] [db] could not connect to database: %v\n", err)
+        }
+
         b, err := os.ReadFile("./conf/channels.json")
         if os.IsNotExist(err) {
-                return nil
-        }
-        if err != nil {
+                // Fall back to database when file is missing (e.g. fresh GitHub Actions run)
+                if dbData := server.LoadChannelsFromDB(); dbData != nil {
+                        fmt.Println(" INFO [db] loaded channels from PostgreSQL (file not found)")
+                        b = dbData
+                } else {
+                        return nil
+                }
+        } else if err != nil {
                 return fmt.Errorf("read file: %w", err)
         }
 

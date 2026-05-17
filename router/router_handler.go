@@ -623,6 +623,42 @@ func readSidecar(path string) string {
         return ""
 }
 
+// ServeThumb serves the locally-stored .thumb.jpg file for a recording.
+// Usage: GET /thumb?path=videos/foo.mkv
+func ServeThumb(c *gin.Context) {
+        serveLocalImage(c, ".thumb.jpg")
+}
+
+// ServeSprite serves the locally-stored .sprite.jpg file for a recording.
+// Usage: GET /sprite?path=videos/foo.mkv
+func ServeSprite(c *gin.Context) {
+        serveLocalImage(c, ".sprite.jpg")
+}
+
+func serveLocalImage(c *gin.Context, suffix string) {
+        path := c.Query("path")
+        if path == "" {
+                c.Status(http.StatusBadRequest)
+                return
+        }
+        abs, err := filepath.Abs(path + suffix)
+        if err != nil {
+                c.Status(http.StatusNotFound)
+                return
+        }
+        wd, _ := os.Getwd()
+        if !strings.HasPrefix(abs, wd) {
+                c.Status(http.StatusForbidden)
+                return
+        }
+        if _, err := os.Stat(abs); err != nil {
+                c.Status(http.StatusNotFound)
+                return
+        }
+        c.Header("Cache-Control", "public, max-age=604800")
+        c.File(abs)
+}
+
 func extractFileCode(link string) string {
         parts := strings.Split(strings.TrimRight(link, "/"), "/")
         if len(parts) > 0 {
