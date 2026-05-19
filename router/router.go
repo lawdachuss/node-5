@@ -5,6 +5,7 @@ import (
         "html/template"
         "log"
         "path/filepath"
+        "strings"
 
         "github.com/gin-gonic/gin"
         "github.com/teacat/chaturbate-dvr/router/view"
@@ -40,12 +41,19 @@ func SetupAuth(r *gin.Engine) {
         }
 }
 
-// SetupStatic serves static frontend files.
+// SetupStatic serves static frontend files with aggressive browser caching.
 func SetupStatic(r *gin.Engine) {
         fs, err := view.StaticFS()
         if err != nil {
                 log.Fatalf("failed to initialize static files: %v", err)
         }
+        // Cache static assets for 24 h — avoids repeat downloads on every page load.
+        r.Use(func(c *gin.Context) {
+                if strings.HasPrefix(c.Request.URL.Path, "/static/") {
+                        c.Header("Cache-Control", "public, max-age=86400")
+                }
+                c.Next()
+        })
         r.StaticFS("/static", fs)
 }
 

@@ -6,9 +6,10 @@
     <link rel="stylesheet" href="/static/styles/app.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-    <script src="/static/scripts/htmx.min.js" crossorigin="anonymous"></script>
-    <script src="/static/scripts/sse.min.js" crossorigin="anonymous"></script>
+    <link rel="dns-prefetch" href="https://img2.pixhost.to" />
+    <link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'"
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" /></noscript>
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
@@ -268,7 +269,7 @@
     </style>
 </head>
 
-<body class="h-dvh font-sans overflow-hidden" hx-ext="sse">
+<body class="h-dvh font-sans overflow-hidden" hx-ext="sse" hx-boost="false">
 <div class="flex h-dvh">
 
     <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
@@ -742,8 +743,8 @@ var LOG_LEVEL_STYLE = {
 
 function getLogMeta(level, msg) {
     var ls = LOG_LEVEL_STYLE[level] || LOG_LEVEL_STYLE['INFO'];
-    // ERROR/WARN always use level color
-    if (ls.type === 'error') return { type: ls.type, msgColor: ls.msgColor, levelStyle: ls };
+    // ERROR and WARN always win — use their own color/type regardless of message prefix
+    if (ls.type === 'error' || ls.type === 'warn') return { type: ls.type, msgColor: ls.msgColor, levelStyle: ls };
     // Otherwise check message prefix rules
     for (var i = 0; i < LOG_MSG_RULES.length; i++) {
         if (LOG_MSG_RULES[i].re.test(msg)) {
@@ -813,6 +814,8 @@ function renderLogLine(raw) {
 
 // Per-container line count cache to avoid repeated querySelectorAll
 var _logLineCount = {};
+// Debounce timers for count updates
+var _countTimer = {};
 function appendLog(container, rawText, animate) {
     var html = renderLogLine(rawText);
     if (!html) return null;
@@ -859,15 +862,18 @@ function applyLineFilter(container, line) {
     }
 }
 
-// Update entry count display
+// Update entry count display — debounced so we don't thrash the DOM on every append
 function updateLogCount(container) {
-    var username = container.id.replace('-log-container', '');
-    var cnt = document.getElementById(username + '-log-count');
-    if (cnt) {
-        var visible = container.querySelectorAll('.log-line:not(.log-filtered)').length;
+    var id = container.id;
+    clearTimeout(_countTimer[id]);
+    _countTimer[id] = setTimeout(function() {
+        var username = id.replace('-log-container', '');
+        var cnt = document.getElementById(username + '-log-count');
+        if (!cnt) return;
         var total   = container.querySelectorAll('.log-line').length;
+        var visible = container.querySelectorAll('.log-line:not(.log-filtered)').length;
         cnt.textContent = visible === total ? total + ' entries' : visible + ' / ' + total;
-    }
+    }, 250);
 }
 
 // ════════════════════════════════════════════════════
@@ -946,11 +952,11 @@ document.addEventListener('htmx:sseMessage', function(e) {
             updateLogCount(container);
         }
 
-        // Auto-scroll if enabled
+        // Auto-scroll if enabled — use rAF to avoid forced reflow on each append
         var panel = container.closest('.flex-1.min-w-0');
         var toggle = panel && panel.querySelector('.log-scroll-toggle');
         if (!toggle || toggle.checked) {
-            container.scrollTop = container.scrollHeight;
+            requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
         }
     }
 });
@@ -1014,11 +1020,13 @@ document.querySelectorAll('.log-container').forEach(function(container) {
     });
 
     // Scroll to bottom
-    container.scrollTop = container.scrollHeight;
+    requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
 
     // Initial count
     updateLogCount(container);
 });
 </script>
+<script src="/static/scripts/htmx.min.js" crossorigin="anonymous"></script>
+<script src="/static/scripts/sse.min.js" crossorigin="anonymous"></script>
 </body>
 </html>

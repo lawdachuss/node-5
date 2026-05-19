@@ -11,7 +11,7 @@
 
   <!-- Thumbnail -->
   <div class="mb-4 rounded-xl overflow-hidden aspect-video relative group thumb-wrap">
-    <img src="https://thumb.live.mmcdn.com/ri/{{ .Username }}.jpg"
+    <img src="https://thumb.live.mmcdn.com/ri/{{ .Username }}.jpg" decoding="async"
          alt="{{ .Username }}"
          class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
          onerror="this.parentElement.style.display='flex';this.parentElement.style.alignItems='center';this.parentElement.style.justifyContent='center';this.style.display='none'"

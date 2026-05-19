@@ -6,7 +6,11 @@
     <link rel="stylesheet" href="/static/styles/app.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="dns-prefetch" href="https://img2.pixhost.to" />
+    <link rel="dns-prefetch" href="https://t2.pixhost.to" />
+    <link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'"
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" /></noscript>
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
@@ -222,6 +226,8 @@
         /* ── Performance ── */
         .video-card { contain: layout style paint; }
         .sprite-anim { image-rendering: auto; }
+        .sprite-overlay { will-change: opacity; }
+        .play-btn { will-change: transform; }
 
         /* ── Light mode ── */
         html:not(.dark) body { background: #f4f4f5; color: #18181b; }
@@ -332,7 +338,7 @@
                  data-video-href="{{ if .FullPath }}/video?path={{ .FullPath | urlquery }}{{ else }}/video?path={{ .Filename | urlquery }}{{ end }}"
                  onclick="location.href=this.dataset.videoHref">
                 <div class="card-thumb">
-                    {{ if .ThumbnailURL }}<img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />{{ end }}
+                    {{ if .ThumbnailURL }}<img src="{{ .ThumbnailURL }}" alt="" loading="lazy" decoding="async" />{{ end }}
                     {{ if .SpriteURL }}<div class="sprite-overlay"><div class="sprite-anim"></div></div>{{ end }}
                     {{ if not .ThumbnailURL }}
                     <div class="w-full h-full flex items-center justify-center" style="background:var(--bg-card)">
@@ -350,7 +356,7 @@
                         <span class="badge badge-size">{{ .Size }}</span>
                     </div>
                     {{ if not .FullPath }}
-                    <div class="absolute bottom-2.5 left-2.5 z-4 pointer-events-none">
+                    <div class="absolute bottom-2.5 left-2.5 pointer-events-none" style="z-index:4">
                         <span class="uploaded-badge"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Uploaded</span>
                     </div>
                     {{ end }}
@@ -416,7 +422,7 @@
                 <!-- Thumbnail -->
                 <div class="card-thumb">
                     {{ if .ThumbnailURL }}
-                    <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" />
+                    <img src="{{ .ThumbnailURL }}" alt="" loading="lazy" decoding="async" />
                     {{ end }}
 
                     {{ if .SpriteURL }}
@@ -453,7 +459,7 @@
 
                     <!-- Uploaded badge -->
                     {{ if not .FullPath }}
-                    <div class="absolute bottom-2.5 left-2.5 z-4 pointer-events-none">
+                    <div class="absolute bottom-2.5 left-2.5 pointer-events-none" style="z-index:4">
                         <span class="uploaded-badge">
                             <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
                             Uploaded
