@@ -220,18 +220,42 @@ func (m *Manager) CreateChannel(conf *entity.ChannelConfig, shouldSave bool) err
 func (m *Manager) StopChannel(username string) error {
         thing, ok := m.Channels.Load(username)
         if !ok {
+                fmt.Printf("[DEBUG] StopChannel: channel %q not found in memory\n", username)
                 return nil
         }
         thing.(*channel.Channel).Stop()
         m.Channels.Delete(username)
+        fmt.Printf("[DEBUG] StopChannel: stopped and removed %q from memory\n", username)
 
+        // Collect remaining usernames BEFORE the saves so the cleanup is consistent.
+        var remaining []string
+        m.Channels.Range(func(key, _ any) bool {
+                remaining = append(remaining, key.(string))
+                return true
+        })
+
+        // 1. Try a targeted DELETE for the removed channel.
         if err := server.DeleteChannelFromDB(username); err != nil {
-                fmt.Printf("[WARN] failed to delete channel %s from DB: %v\n", username, err)
+                fmt.Printf("[WARN] DeleteChannelFromDB(%q) failed: %v\n", username, err)
+        } else {
+                fmt.Printf("[DEBUG] DeleteChannelFromDB(%q) succeeded\n", username)
         }
 
+        // 2. Belt-and-suspenders: delete any Supabase rows NOT in the remaining set.
+        //    This catches cases where the targeted DELETE is blocked by RLS but the
+        //    bulk filter variant is allowed, and also cleans up any other stale rows.
+        if err := server.DeleteChannelsNotInDB(remaining); err != nil {
+                fmt.Printf("[WARN] DeleteChannelsNotInDB failed: %v\n", err)
+        } else {
+                fmt.Printf("[DEBUG] DeleteChannelsNotInDB succeeded, remaining: %v\n", remaining)
+        }
+
+        // 3. Upsert the remaining channels to keep Supabase in sync.
         if err := m.SaveConfig(); err != nil {
+                fmt.Printf("[ERROR] SaveConfig after delete: %v\n", err)
                 return fmt.Errorf("save config: %w", err)
         }
+        fmt.Printf("[DEBUG] StopChannel: done, remaining channels: %v\n", remaining)
         return nil
 }
 
