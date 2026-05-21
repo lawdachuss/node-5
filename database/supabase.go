@@ -359,38 +359,39 @@ func (c *Client) GetSetting(key string, result interface{}) error {
 // ============================================================================
 
 type Tunnel struct {
-        ID        string `json:"id,omitempty"`
-        URL       string `json:"url"`
-        RunID     int    `json:"run_id"`
-        IsActive  bool   `json:"is_active"`
-        CreatedAt string `json:"created_at,omitempty"`
-        ExpiresAt string `json:"expires_at,omitempty"`
+	ID         string `json:"id,omitempty"`
+	URL        string `json:"url"`
+	RunID      int    `json:"run_id"`
+	InstanceID string `json:"instance_id,omitempty"`
+	IsActive   bool   `json:"is_active"`
+	CreatedAt  string `json:"created_at,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
 }
 
 // SaveTunnel creates a new tunnel
 func (c *Client) SaveTunnel(tunnel *Tunnel) error {
-        var result []Tunnel
-        return c.post("/tunnels", tunnel, &result)
+	var result []Tunnel
+	return c.post("/tunnels", tunnel, &result)
 }
 
-// GetActiveTunnel retrieves the most recent active tunnel
-func (c *Client) GetActiveTunnel() (*Tunnel, error) {
-        var tunnels []Tunnel
-        err := c.get("/tunnels?is_active=eq.true&order=created_at.desc&limit=1", &tunnels)
-        if err != nil {
-                return nil, err
-        }
-        if len(tunnels) == 0 {
-                return nil, fmt.Errorf("no active tunnel found")
-        }
-        return &tunnels[0], nil
+// GetActiveTunnel retrieves the most recent active tunnel for the given instance
+func (c *Client) GetActiveTunnel(instanceID string) (*Tunnel, error) {
+	var tunnels []Tunnel
+	err := c.get(fmt.Sprintf("/tunnels?is_active=eq.true&instance_id=eq.%s&order=created_at.desc&limit=1", url.QueryEscape(instanceID)), &tunnels)
+	if err != nil {
+		return nil, err
+	}
+	if len(tunnels) == 0 {
+		return nil, fmt.Errorf("no active tunnel found")
+	}
+	return &tunnels[0], nil
 }
 
-// DeactivateOldTunnels marks all tunnels as inactive
-func (c *Client) DeactivateOldTunnels() error {
-        return c.patch("/tunnels?is_active=eq.true", map[string]interface{}{
-                "is_active": false,
-        })
+// DeactivateOldTunnels marks all tunnels as inactive for the given instance
+func (c *Client) DeactivateOldTunnels(instanceID string) error {
+	return c.patch(fmt.Sprintf("/tunnels?is_active=eq.true&instance_id=eq.%s", url.QueryEscape(instanceID)), map[string]interface{}{
+		"is_active": false,
+	})
 }
 
 // ============================================================================

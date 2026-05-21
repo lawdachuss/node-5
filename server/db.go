@@ -1,17 +1,33 @@
 package server
 
 import (
-        "bytes"
-        "encoding/json"
-        "fmt"
-        "io"
-        "net/http"
-        "strings"
-        "time"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
-        "github.com/teacat/chaturbate-dvr/database"
-        "github.com/teacat/chaturbate-dvr/entity"
+	"github.com/teacat/chaturbate-dvr/database"
+	"github.com/teacat/chaturbate-dvr/entity"
 )
+
+// ─── Instance ID ──────────────────────────────────────────────────────────────
+
+var instanceID string
+
+func init() {
+	instanceID = os.Getenv("INSTANCE_ID")
+	if instanceID == "" {
+		instanceID = "default"
+	}
+}
+
+func channelsKey() string {
+	return "channels_" + instanceID
+}
 
 // ─── Supabase client ──────────────────────────────────────────────────────────
 
@@ -198,15 +214,18 @@ func SaveChannelsToDB(data []byte) error {
                 return fmt.Errorf("Supabase not configured")
         }
 
-        // ── Primary (blocking): update the authoritative channel list blob. ──────
-        if err := saveJSONSetting("channels", data); err != nil {
-                return fmt.Errorf("save channels to app_settings: %w", err)
-        }
+	// ── Primary (blocking): update the authoritative channel list blob. ──────
+	if err := saveJSONSetting(channelsKey(), data); err != nil {
+		return fmt.Errorf("save channels to app_settings: %w", err)
+	}
 
-        // ── Secondary (non-blocking): sync individual rows for FK integrity. ─────
-        // Deliberately fire-and-forget — a slow or failed upsert must never block
-        // the delete/pause/resume HTTP response.
-        dataCopy := make([]byte, len(data))
+	// ── Secondary (non-blocking): sync individual rows for FK integrity. ─────
+	// Deliberately fire-and-forget — a slow or failed upsert must never block
+	// the delete/pause/resume HTTP response.
+	// NOTE: These rows are shared across instances and are no longer read by
+	// LoadChannelsFromDB (the fallback was removed). They are kept only for
+	// backward compatibility with external tools that query the channels table.
+	dataCopy := make([]byte, len(data))
         copy(dataCopy, data)
         go func() {
                 var configs []*entity.ChannelConfig
@@ -235,49 +254,24 @@ func SaveChannelsToDB(data []byte) error {
 }
 
 // LoadChannelsFromDB loads channels from Supabase.
-// It reads from app_settings first (the authoritative blob written by
-// SaveChannelsToDB), which correctly reflects deletions without needing
-// DELETE permission. Falls back to the channels table rows for
-// backward-compatibility with older deployments that never wrote the blob.
+// It reads from app_settings using the instance-namespaced key (channels_<INSTANCE_ID>),
+// which correctly reflects deletions without needing DELETE permission.
+// The legacy fallback to the channels table has been removed because the channels
+// table is shared across all instances and would leak other instances' channels.
 func LoadChannelsFromDB() []byte {
-        client := GetDBClient()
-        if client == nil {
-                return nil
-        }
+	client := GetDBClient()
+	if client == nil {
+		return nil
+	}
 
-        // Primary: read the authoritative channel list blob from app_settings.
-        if data := loadJSONSetting("channels"); data != nil {
-                return data
-        }
+	// Read the instance-namespaced channel list blob from app_settings.
+	if data := loadJSONSetting(channelsKey()); data != nil {
+		return data
+	}
 
-        // Fallback: read individual rows from the channels table (legacy path).
-        fmt.Println("[INFO] LoadChannelsFromDB: no channels blob in app_settings, falling back to channels table")
-        channels, err := client.GetAllChannels()
-        if err != nil {
-                fmt.Printf("[WARN] failed to load channels from Supabase: %v\n", err)
-                return nil
-        }
-
-        configs := make([]*entity.ChannelConfig, len(channels))
-        for i, ch := range channels {
-                configs[i] = &entity.ChannelConfig{
-                        Username:    ch.Username,
-                        Framerate:   ch.Framerate,
-                        Resolution:  ch.Resolution,
-                        Pattern:     ch.Pattern,
-                        MaxDuration: ch.MaxDuration,
-                        MaxFilesize: ch.MaxFilesize,
-                        Compress:    ch.Compress,
-                        CreatedAt:   ch.CreatedAt,
-                }
-                configs[i].IsPaused.Store(ch.IsPaused)
-        }
-
-        data, err := json.Marshal(configs)
-        if err != nil {
-                return nil
-        }
-        return data
+	// No channels configured yet for this instance.
+	fmt.Printf("[INFO] LoadChannelsFromDB: no channels blob found for instance %q\n", instanceID)
+	return nil
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -503,12 +497,12 @@ func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tag
                 Filesize:  filesize,
                 Gender:    gender,
                 EmbedURL:  embedURL,
-        }
-        if ch, err := client.GetChannel(username); err == nil {
-                rec.ChannelID = ch.ID
-        }
+	}
+	// Skip channel_id lookup — the channels table is shared across instances
+	// and the FK would point to the wrong instance's row.
+	// Recordings are uniquely identified by filename, so channel_id is cosmetic.
 
-        // Save recording first
+	// Save recording first
         if err := client.SaveRecording(rec); err != nil {
                 return fmt.Errorf("save recording: %w", err)
         }
@@ -543,37 +537,38 @@ func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tag
 
 // SaveTunnelToDB saves a tunnel URL to Supabase
 func SaveTunnelToDB(tunnelURL string, runID int) error {
-        client := GetDBClient()
-        if client == nil {
-                return fmt.Errorf("Supabase not configured")
-        }
+	client := GetDBClient()
+	if client == nil {
+		return fmt.Errorf("Supabase not configured")
+	}
 
-        if err := client.DeactivateOldTunnels(); err != nil {
-                fmt.Printf("[WARN] failed to deactivate old tunnels: %v\n", err)
-        }
+	if err := client.DeactivateOldTunnels(instanceID); err != nil {
+		fmt.Printf("[WARN] failed to deactivate old tunnels: %v\n", err)
+	}
 
-        tunnel := &database.Tunnel{
-                URL:      tunnelURL,
-                RunID:    runID,
-                IsActive: true,
-        }
+	tunnel := &database.Tunnel{
+		URL:        tunnelURL,
+		RunID:      runID,
+		InstanceID: instanceID,
+		IsActive:   true,
+	}
 
-        return client.SaveTunnel(tunnel)
+	return client.SaveTunnel(tunnel)
 }
 
 // LoadCurrentTunnel loads the active tunnel URL from Supabase
 func LoadCurrentTunnel() (string, error) {
-        client := GetDBClient()
-        if client == nil {
-                return "", nil
-        }
+	client := GetDBClient()
+	if client == nil {
+		return "", nil
+	}
 
-        tunnel, err := client.GetActiveTunnel()
-        if err != nil {
-                return "", err
-        }
+	tunnel, err := client.GetActiveTunnel(instanceID)
+	if err != nil {
+		return "", err
+	}
 
-        return tunnel.URL, nil
+	return tunnel.URL, nil
 }
 
 // ─── Preview Links ────────────────────────────────────────────────────────────

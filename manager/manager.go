@@ -250,13 +250,12 @@ func (m *Manager) StopChannel(username string) error {
         }
         fmt.Printf(" INFO [manager] channel %q deleted and persisted to Supabase\n", username)
 
-        // Step 3 & 4: non-blocking cleanup — these never need to block the redirect.
-        go func() {
-                thing.(*channel.Channel).Stop()
-                if err := server.DeleteChannelFromDB(username); err != nil {
-                        fmt.Printf("[WARN] DeleteChannelFromDB(%q): %v\n", username, err)
-                }
-        }()
+	// Step 3: non-blocking cleanup — stop the ffmpeg process.
+	// The channels table row is intentionally left orphaned because it is shared
+	// across instances and no longer read by LoadChannelsFromDB.
+	go func() {
+		thing.(*channel.Channel).Stop()
+	}()
 
         return nil
 }

@@ -30,6 +30,7 @@ permissions:
 env:
   APP_URL: http://localhost:8080
   COMPOSE_PROJECT_NAME: recorder
+  INSTANCE_ID: "a"
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
   STREAMTAPE_LOGIN: ${{ secrets.STREAMTAPE_LOGIN }}
@@ -283,14 +284,14 @@ jobs:
             echo "WARNING: Tunnel URL not verified as reachable (last status: $status) — recording still works locally"
           fi
 
-          # Save tunnel URL to Supabase
-          curl -fsS -X POST "${SUPABASE_URL}/rest/v1/tunnel_sessions" \
-            -H "apikey: ${SUPABASE_API_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -H "Prefer: return=minimal" \
-            -d "{\"run_id\": ${GITHUB_RUN_NUMBER}, \"url\": \"${tunnel_url}\", \"started_at\": \"$(date -u +%FT%TZ)\", \"is_active\": true}" \
-            2>/dev/null || echo "Could not save tunnel URL to Supabase tunnel_sessions table."
+           # Save tunnel URL to Supabase
+           curl -fsS -X POST "${SUPABASE_URL}/rest/v1/tunnel_sessions" \
+             -H "apikey: ${SUPABASE_API_KEY}" \
+             -H "Authorization: Bearer ${SUPABASE_API_KEY}" \
+             -H "Content-Type: application/json" \
+             -H "Prefer: return=minimal" \
+             -d "{\"run_id\": ${GITHUB_RUN_NUMBER}, \"instance_id\": \"${INSTANCE_ID}\", \"url\": \"${tunnel_url}\", \"started_at\": \"$(date -u +%FT%TZ)\", \"is_active\": true}" \
+             2>/dev/null || echo "Could not save tunnel URL to Supabase tunnel_sessions table."
 
           # Also persist to the app_settings table (read by the Go code at runtime)
           curl -fsS -X POST "${SUPABASE_URL}/rest/v1/app_settings" \
@@ -455,17 +456,17 @@ jobs:
         run: |
           set +e
 
-          # Mark tunnel as inactive in both tables
-          if [[ -n "${SUPABASE_URL}" && -n "${SUPABASE_API_KEY}" ]]; then
-            if [[ -n "${TUNNEL_URL:-}" ]]; then
-              curl -sS -X PATCH "${SUPABASE_URL}/rest/v1/tunnel_sessions?run_id=eq.${GITHUB_RUN_NUMBER}" \
-                -H "apikey: ${SUPABASE_API_KEY}" \
-                -H "Authorization: Bearer ${SUPABASE_API_KEY}" \
-                -H "Content-Type: application/json" \
-                -H "Prefer: return=minimal" \
-                -d "{\"is_active\": false, \"last_seen_at\": \"$(date -u +%FT%TZ)\"}" \
-                >/dev/null || true
-            fi
+           # Mark tunnel as inactive in both tables
+           if [[ -n "${SUPABASE_URL}" && -n "${SUPABASE_API_KEY}" ]]; then
+             if [[ -n "${TUNNEL_URL:-}" ]]; then
+               curl -sS -X PATCH "${SUPABASE_URL}/rest/v1/tunnel_sessions?run_id=eq.${GITHUB_RUN_NUMBER}&instance_id=eq.${INSTANCE_ID}" \
+                 -H "apikey: ${SUPABASE_API_KEY}" \
+                 -H "Authorization: Bearer ${SUPABASE_API_KEY}" \
+                 -H "Content-Type: application/json" \
+                 -H "Prefer: return=minimal" \
+                 -d "{\"is_active\": false, \"last_seen_at\": \"$(date -u +%FT%TZ)\"}" \
+                 >/dev/null || true
+             fi
           fi
 
           # Kill tunnel processes
