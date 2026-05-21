@@ -41,10 +41,14 @@
             color: #e4e4e7;
             font-size: 13px;
             padding: 9px 14px 9px 38px;
-            width: 240px;
+            width: 100%;
             transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
         }
-        .search-input:focus { outline: none; width: 300px; background: rgba(255,255,255,0.06); border-color: rgba(212,160,83,0.4); box-shadow: 0 0 0 4px rgba(212,160,83,0.08), 0 0 20px rgba(212,160,83,0.05); }
+        @media (min-width: 640px) {
+            .search-input { width: 240px; }
+            .search-input:focus { width: 300px; }
+        }
+        .search-input:focus { outline: none; background: rgba(255,255,255,0.06); border-color: rgba(212,160,83,0.4); box-shadow: 0 0 0 4px rgba(212,160,83,0.08), 0 0 20px rgba(212,160,83,0.05); }
         .search-input::placeholder { color: #3f3f46; }
         .filter-btn {
             display: inline-flex; align-items: center; gap: 6px;
@@ -259,7 +263,7 @@
 
 <!-- ═══ STICKY HEADER ═══ -->
 <div class="page-header">
-    <div class="max-w-screen-xl mx-auto px-5 py-3.5 flex items-center justify-between gap-4">
+    <div class="max-w-screen-xl mx-auto px-5 py-3.5 flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3 min-w-0">
             <a href="/" class="nav-btn w-9 h-9 shrink-0"
                title="Dashboard">
@@ -272,9 +276,9 @@
         </div>
 
         <div class="flex items-center gap-2">
-            <div class="relative hidden sm:block">
+            <div class="relative w-full sm:w-auto">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-                <input type="text" id="search-input" class="search-input" placeholder="Search videos…" oninput="filterSearch(this.value)" />
+                <input type="text" id="search-input" class="search-input w-full sm:w-[240px]" placeholder="Search videos…" oninput="filterSearch(this.value)" />
             </div>
 
             <div class="relative" id="channel-filter-dropdown">
@@ -329,7 +333,7 @@
             <div class="flex-1 h-px" style="background:rgba(255,255,255,0.04)"></div>
             <span class="text-[10px] text-zinc-600">Latest recordings</span>
         </div>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div class="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {{ range .Recommended }}
             <div class="video-card group cursor-pointer"
                  data-filename="{{ .Filename }}"
@@ -410,7 +414,7 @@
         </div>
 
         <!-- Video grid -->
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div class="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {{ range .Videos }}
             <div class="video-card group cursor-pointer"
                  data-filename="{{ .Filename }}"

@@ -150,6 +150,19 @@
             gap: 8px;
         }
         .ctrl-left, .ctrl-right { display: flex; align-items: center; gap: 4px; }
+        @media (max-width: 640px) {
+            .controls-row { gap: 4px; flex-wrap: wrap; }
+            .ctrl-left { gap: 2px; }
+            .ctrl-right { gap: 2px; }
+            .ctrl-btn { width: 32px; height: 32px; }
+            .ctrl-btn svg { width: 16px; height: 16px; }
+            .time-display { font-size: 11px; margin-left: 4px; }
+            .speed-select { font-size: 10px; padding: 3px 4px; }
+            .server-btn { padding: 4px 8px; font-size: 10px; }
+            .server-btn .server-name { max-width: 60px; }
+            .server-dropdown { min-width: 160px; }
+            .volume-wrap:hover .volume-slider { width: 50px; }
+        }
 
         .ctrl-btn {
             width: 36px; height: 36px;
@@ -428,6 +441,14 @@
             display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px;
             border-bottom: 1px solid var(--border-subtle);
         }
+        @media (max-width: 640px) {
+            .meta-top { padding: 14px 16px; gap: 10px; }
+            .meta-grid { padding: 14px 16px; gap: 8px; }
+            .meta-cell { padding: 8px 12px; }
+            .meta-label { font-size: 8px; }
+            .meta-value { font-size: 12px; }
+            .action-btn { padding: 6px 12px; font-size: 11px; }
+        }
         .meta-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
@@ -487,6 +508,10 @@
         .related-thumb {
             width: 160px; min-width: 160px; height: 90px;
             border-radius: 8px; overflow: hidden; background: var(--bg-card);
+        }
+        @media (max-width: 640px) {
+            .related-thumb { width: 120px; min-width: 120px; height: 68px; }
+            .related-card { gap: 8px; padding: 8px; }
         }
         .related-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
         .related-card:hover .related-thumb img { transform: scale(1.08); }
@@ -549,7 +574,7 @@
 
 <!-- ═══ HEADER ═══ -->
 <div class="page-header">
-    <div id="page-container" class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4 transition-all duration-300">
+    <div id="page-container" class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3 transition-all duration-300 flex-wrap">
         <div class="flex items-center gap-3 min-w-0">
             <a href="javascript:history.back()" class="header-btn shrink-0" title="Back">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
