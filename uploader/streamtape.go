@@ -4,10 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -39,9 +36,9 @@ func NewStreamtapeUploader(login, key string) *StreamtapeUploader {
 }
 
 type streamtapeServerResp struct {
-	Status  int    `json:"status"`
-	Msg     string `json:"msg"`
-	Result  struct {
+	Status int    `json:"status"`
+	Msg    string `json:"msg"`
+	Result struct {
 		URL string `json:"url"`
 	} `json:"result"`
 }
@@ -103,52 +100,23 @@ func (u *StreamtapeUploader) getUploadURL() (string, error) {
 }
 
 func (u *StreamtapeUploader) uploadFile(filePath, uploadURL string) (string, error) {
-	file, err := os.Open(filePath)
+	// Build multipart body with exact Content-Length — Streamtape rejects chunked encoding.
+	body, contentLen, contentType, closer, err := multipartStream(nil, "file", filePath)
 	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
+		return "", fmt.Errorf("build multipart: %w", err)
 	}
-	defer file.Close()
+	defer closer.Close()
 
-	pipeReader, pipeWriter := io.Pipe()
-	writer := multipart.NewWriter(pipeWriter)
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer func() {
-			writer.Close()
-			pipeWriter.Close()
-		}()
-		part, err := writer.CreateFormFile("file", filepath.Base(filePath))
-		if err != nil {
-			errCh <- fmt.Errorf("create form file: %w", err)
-			pipeWriter.CloseWithError(err)
-			return
-		}
-		buf := make([]byte, 1024*1024)
-		if _, err := io.CopyBuffer(part, file, buf); err != nil {
-			errCh <- fmt.Errorf("copy file: %w", err)
-			pipeWriter.CloseWithError(err)
-			return
-		}
-		errCh <- nil
-	}()
-
-	req, err := http.NewRequest("POST", uploadURL, pipeReader)
+	req, err := http.NewRequest("POST", uploadURL, body)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.ContentLength = contentLen
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", defaultUserAgent)
 
 	resp, err := u.client.Do(req)
 	if err != nil {
-		select {
-		case goroutineErr := <-errCh:
-			if goroutineErr != nil {
-				return "", fmt.Errorf("multipart write: %w (request: %v)", goroutineErr, err)
-			}
-		default:
-		}
 		return "", fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()

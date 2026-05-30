@@ -1,9 +1,56 @@
 package uploader
 
 import (
+        "bytes"
         "fmt"
+        "io"
+        "mime/multipart"
+        "os"
+        "path/filepath"
         "sync"
 )
+
+// multipartStream builds a multipart request body that streams the file without
+// loading it into RAM, while still setting an exact Content-Length so servers
+// that reject chunked transfer encoding (Streamtape, Mixdrop, Pixeldrain) work.
+//
+// fields is written before the file part (may be nil).
+// Returns: body reader, content-length, multipart content-type, closer (the opened file), error.
+func multipartStream(fields map[string]string, fileField, filePath string) (io.Reader, int64, string, io.Closer, error) {
+        fi, err := os.Stat(filePath)
+        if err != nil {
+                return nil, 0, "", nil, fmt.Errorf("stat: %w", err)
+        }
+
+        // Build the preamble (all multipart headers, but NOT the file bytes).
+        var preamble bytes.Buffer
+        mw := multipart.NewWriter(&preamble)
+
+        for k, v := range fields {
+                if err := mw.WriteField(k, v); err != nil {
+                        return nil, 0, "", nil, fmt.Errorf("write field %s: %w", k, err)
+                }
+        }
+
+        // CreateFormFile writes the part header into preamble; we do NOT write file
+        // bytes through this writer — they come from the file directly.
+        if _, err := mw.CreateFormFile(fileField, filepath.Base(filePath)); err != nil {
+                return nil, 0, "", nil, fmt.Errorf("create form file: %w", err)
+        }
+
+        // Closing boundary that would normally be written by mw.Close().
+        closing := fmt.Sprintf("\r\n--%s--\r\n", mw.Boundary())
+        contentType := mw.FormDataContentType()
+        totalLen := int64(preamble.Len()) + fi.Size() + int64(len(closing))
+
+        file, err := os.Open(filePath)
+        if err != nil {
+                return nil, 0, "", nil, fmt.Errorf("open: %w", err)
+        }
+
+        body := io.MultiReader(&preamble, file, bytes.NewReader([]byte(closing)))
+        return body, totalLen, contentType, file, nil
+}
 
 // Logger is the interface for logging upload events.
 // The channel package implements this with ch.Info/ch.Error.
