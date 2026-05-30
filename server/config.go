@@ -15,6 +15,11 @@ type persistedSettings struct {
 	Cookies   string `json:"cookies"`
 	UserAgent string `json:"user_agent"`
 	ByparrURL string `json:"byparr_url"`
+	StreamtapeLogin string `json:"streamtape_login,omitempty"`
+	StreamtapeKey   string `json:"streamtape_key,omitempty"`
+	MixdropEmail    string `json:"mixdrop_email,omitempty"`
+	MixdropToken    string `json:"mixdrop_token,omitempty"`
+	PixelDrainToken string `json:"pixeldrain_token,omitempty"`
 }
 
 // SaveSettings writes the runtime cookies and user-agent to Supabase.
@@ -23,7 +28,12 @@ func SaveSettings() error {
 	s := persistedSettings{
 		Cookies:   Config.Cookies,
 		UserAgent: Config.UserAgent,
-		ByparrURL: Config.ByparrURL,
+		ByparrURL:        Config.ByparrURL,
+		StreamtapeLogin:  Config.StreamtapeLogin,
+		StreamtapeKey:    Config.StreamtapeKey,
+		MixdropEmail:     Config.MixdropEmail,
+		MixdropToken:     Config.MixdropToken,
+		PixelDrainToken:  Config.PixelDrainToken,
 	}
 	configMu.RUnlock()
 
@@ -60,6 +70,21 @@ func LoadSettings() error {
 	if s.ByparrURL != "" {
 		Config.ByparrURL = s.ByparrURL
 	}
+	if s.StreamtapeLogin != "" {
+		Config.StreamtapeLogin = s.StreamtapeLogin
+	}
+	if s.StreamtapeKey != "" {
+		Config.StreamtapeKey = s.StreamtapeKey
+	}
+	if s.MixdropEmail != "" {
+		Config.MixdropEmail = s.MixdropEmail
+	}
+	if s.MixdropToken != "" {
+		Config.MixdropToken = s.MixdropToken
+	}
+	if s.PixelDrainToken != "" {
+		Config.PixelDrainToken = s.PixelDrainToken
+	}
 	configMu.Unlock()
 
 	return nil
@@ -74,6 +99,28 @@ func UpdateByparrCredentials(cookies, userAgent string) {
 	}
 	if userAgent != "" {
 		Config.UserAgent = userAgent
+	}
+	configMu.Unlock()
+}
+
+// UpdateUploaderCredentials updates upload service credentials (Streamtape, Mixdrop)
+// and protects concurrent access with a mutex.
+func UpdateUploaderCredentials(streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken, pixeldrainToken string) {
+	configMu.Lock()
+	if streamtapeLogin != "" {
+		Config.StreamtapeLogin = streamtapeLogin
+	}
+	if streamtapeKey != "" {
+		Config.StreamtapeKey = streamtapeKey
+	}
+	if mixdropEmail != "" {
+		Config.MixdropEmail = mixdropEmail
+	}
+	if mixdropToken != "" {
+		Config.MixdropToken = mixdropToken
+	}
+	if pixeldrainToken != "" {
+		Config.PixelDrainToken = pixeldrainToken
 	}
 	configMu.Unlock()
 }

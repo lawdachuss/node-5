@@ -28,11 +28,12 @@ type MultiHostUploader struct {
         byse        *ByseUploader
         streamtape  *StreamtapeUploader
         mixdrop     *MixdropUploader
+        pixeldrain  *PixeldrainUploader
         log         Logger
 }
 
 // NewMultiHostUploader creates a new multi-host uploader
-func NewMultiHostUploader(turboViPlayAPIKey, voeSXAPIKey, sendCMAPIKey, byseAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken string, log Logger) *MultiHostUploader {
+func NewMultiHostUploader(turboViPlayAPIKey, voeSXAPIKey, sendCMAPIKey, byseAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken, pixeldrainToken string, log Logger) *MultiHostUploader {
         if log == nil {
                 log = &nilLogger{}
         }
@@ -44,6 +45,7 @@ func NewMultiHostUploader(turboViPlayAPIKey, voeSXAPIKey, sendCMAPIKey, byseAPIK
                 byse:        NewByseUploader(byseAPIKey),
                 streamtape:  NewStreamtapeUploader(streamtapeLogin, streamtapeKey),
                 mixdrop:     NewMixdropUploader(mixdropEmail, mixdropToken),
+                pixeldrain:  NewPixeldrainUploader(pixeldrainToken),
                 log:         log,
         }
 }
@@ -211,6 +213,28 @@ func (m *MultiHostUploader) UploadToAll(filePath string) []UploadResult {
                                 m.log.Error("upload: Mixdrop failed for %s: %v", filePath, err)
                         } else {
                                 m.log.Info("upload: Mixdrop successful for %s: %s", filePath, link)
+                        }
+                }()
+        }
+
+        // Upload to PixelDrain (attempt if uploader is present)
+        if m.pixeldrain != nil {
+                wg.Add(1)
+                go func() {
+                        defer wg.Done()
+                        m.log.Info("upload: starting PixelDrain upload for %s", filePath)
+                        link, err := m.pixeldrain.Upload(filePath)
+                        resultsMu.Lock()
+                        results = append(results, UploadResult{
+                                Host:         "PixelDrain",
+                                DownloadLink: link,
+                                Error:        err,
+                        })
+                        resultsMu.Unlock()
+                        if err != nil {
+                                m.log.Error("upload: PixelDrain failed for %s: %v", filePath, err)
+                        } else {
+                                m.log.Info("upload: PixelDrain successful for %s: %s", filePath, link)
                         }
                 }()
         }

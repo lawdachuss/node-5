@@ -59,6 +59,7 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL string) bool 
                 cfg.StreamtapeKey,
                 cfg.MixdropEmail,
                 cfg.MixdropToken,
+                cfg.PixelDrainToken,
                 ch, // Channel implements uploader.Logger
         )
 

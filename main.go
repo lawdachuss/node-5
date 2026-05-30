@@ -175,7 +175,13 @@ func main() {
                         &cli.StringFlag{
                                 Name:    "mixdrop-token",
                                 Usage:   "API token for Mixdrop uploads",
-                                EnvVars: []string{"MIXDROP_TOKEN"},
+                                EnvVars: []string{"MIXDROP_TOKEN", "MIXDROP_KEY"},
+                                Value:   "",
+                        },
+                        &cli.StringFlag{
+                                Name:    "pixeldrain-token",
+                                Usage:   "API token for PixelDrain uploads",
+                                EnvVars: []string{"PIXELDRAIN_TOKEN", "PIXELDRAIN_API_KEY"},
                                 Value:   "",
                         },
                         &cli.StringFlag{

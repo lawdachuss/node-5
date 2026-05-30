@@ -48,6 +48,7 @@ func New(c *cli.Context) (*entity.Config, error) {
                 StreamtapeKey:     c.String("streamtape-key"),
                 MixdropEmail:      c.String("mixdrop-email"),
                 MixdropToken:      c.String("mixdrop-token"),
+                PixelDrainToken:   c.String("pixeldrain-token"),
                 GitHubToken:       c.String("github-token"),
                 GitHubRepo:        c.String("github-repo"),
                 GitHubBranch:      c.String("github-branch"),

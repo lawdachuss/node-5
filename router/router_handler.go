@@ -135,6 +135,11 @@ type UpdateConfigRequest struct {
         Cookies   string `json:"cookies" form:"cookies"`
         UserAgent string `json:"user_agent" form:"user_agent"`
         ByparrURL string `json:"byparr_url" form:"byparr_url"`
+        StreamtapeLogin string `json:"streamtape_login" form:"streamtape_login"`
+        StreamtapeKey   string `json:"streamtape_key" form:"streamtape_key"`
+        MixdropEmail    string `json:"mixdrop_email" form:"mixdrop_email"`
+        MixdropToken    string `json:"mixdrop_token" form:"mixdrop_token"`
+        PixeldrainToken string `json:"pixeldrain_token" form:"pixeldrain_token"`
 }
 
 // UpdateConfig updates the server configuration from the Web UI form or API POST.
@@ -150,6 +155,10 @@ func UpdateConfig(c *gin.Context) {
         }
         if req.ByparrURL != "" {
                 server.Config.ByparrURL = req.ByparrURL
+        }
+        // Update uploader credentials (Streamtape / Mixdrop / PixelDrain)
+        if req.StreamtapeLogin != "" || req.StreamtapeKey != "" || req.MixdropEmail != "" || req.MixdropToken != "" || req.PixeldrainToken != "" {
+                server.UpdateUploaderCredentials(req.StreamtapeLogin, req.StreamtapeKey, req.MixdropEmail, req.MixdropToken, req.PixeldrainToken)
         }
 
         if err := server.SaveSettings(); err != nil {

@@ -92,6 +92,7 @@ type Config struct {
         StreamtapeKey     string
         MixdropEmail      string
         MixdropToken      string
+        PixelDrainToken   string
 
         GitHubToken       string
         GitHubRepo        string
