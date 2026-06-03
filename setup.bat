@@ -44,13 +44,31 @@ if %ERRORLEVEL% NEQ 0 (
             REM setx PATH replaced with reg add for GitHub Actions compatibility
             reg add "HKCU\Environment" /v Path /t REG_EXPAND_SZ /d "!UserPath!;!WINGET_FOUND!" /f >nul 2>&1
             set "PATH=!PATH!;!WINGET_FOUND!"
+            REM Force refresh PATH for where command
+            for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "UserPath=%%b"
+            for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "MachinePath=%%b"
+            set "PATH=%MachinePath%;%UserPath%;!WINGET_FOUND!"
         )
     )
 
     where ffmpeg >nul 2>nul
     if !ERRORLEVEL! NEQ 0 (
-        echo ERROR: FFmpeg could not be found after install
-        exit /b 1
+        REM Last resort: check if binary exists and skip error
+        set "WINGET_FOUND="
+        for /f "delims=" %%f in ('dir /s /b "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg.Essentials*\ffmpeg.exe" 2^>nul') do (
+            if exist "%%f" set "WINGET_FOUND=%%~dpf"
+        )
+        if not defined WINGET_FOUND (
+            if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe" for %%f in ("%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe") do set "WINGET_FOUND=%%~dpf"
+        )
+        if defined WINGET_FOUND (
+            echo   [WARN] FFmpeg installed but 'where' can't find it - adding to PATH manually
+            set "PATH=!PATH!;!WINGET_FOUND!"
+            echo   [OK] FFmpeg available at !WINGET_FOUND!
+        ) else (
+            echo ERROR: FFmpeg could not be found after install
+            exit /b 1
+        )
     ) else (
         for /f "delims=" %%a in ('where ffmpeg') do echo   [OK] FFmpeg installed at %%a
     )
@@ -62,22 +80,51 @@ REM -- 2. Ensure ffmpeg is in PATH --
 echo [2/7] Ensuring ffmpeg is on PATH...
 where ffmpeg >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: ffmpeg not found in PATH -- DVR will fail to mux/thumbnail
-    exit /b 1
+    REM Try to find it manually if where fails
+    set "FOUND_MANUALLY="
+    for /f "delims=" %%f in ('dir /s /b "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg.Essentials*\ffmpeg.exe" 2^>nul') do (
+        if exist "%%f" (
+            for %%d in ("%%f") do set "FOUND_MANUALLY=%%~dpd"
+            set "PATH=!PATH!;!FOUND_MANUALLY!"
+        )
+    )
+    if not defined FOUND_MANUALLY (
+        if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe" (
+            for %%f in ("%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe") do set "FOUND_MANUALLY=%%~dpf"
+            set "PATH=!PATH!;!FOUND_MANUALLY!"
+        )
+    )
+    if not defined FOUND_MANUALLY (
+        echo ERROR: ffmpeg not found in PATH -- DVR will fail to mux/thumbnail
+        exit /b 1
+    )
+    echo   [OK] Found and added ffmpeg to PATH: !FOUND_MANUALLY!
 )
-for /f "delims=" %%a in ('where ffmpeg') do set "ffmpegPath=%%a"
-for %%a in ("%ffmpegPath%") do set "ffmpegDir=%%~dpa"
-set "ffmpegDir=%ffmpegDir:~0,-1%"
 
-for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "UserPath=%%b"
-echo !UserPath! | find /I "!ffmpegDir!" >nul
-if %ERRORLEVEL% NEQ 0 (
-    REM setx PATH replaced with reg add for GitHub Actions compatibility
-    reg add "HKCU\Environment" /v Path /t REG_EXPAND_SZ /d "!UserPath!;!ffmpegDir!" /f >nul 2>&1
-    set "PATH=!PATH!;!ffmpegDir!"
-    echo   [OK] Added !ffmpegDir! to user PATH
+REM Get ffmpeg directory
+set "ffmpegDir="
+where ffmpeg >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    for /f "delims=" %%a in ('where ffmpeg') do set "ffmpegPath=%%a"
+    for %%a in ("%ffmpegPath%") do set "ffmpegDir=%%~dpa"
+    set "ffmpegDir=%ffmpegDir:~0,-1%"
 ) else (
-    echo   [OK] Already in PATH: !ffmpegDir!
+    REM Use the manually found path
+    set "ffmpegDir=%FOUND_MANUALLY%"
+    set "ffmpegDir=%ffmpegDir:~0,-1%"
+)
+
+if defined ffmpegDir (
+    for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "UserPath=%%b"
+    echo !UserPath! | find /I "!ffmpegDir!" >nul
+    if !ERRORLEVEL! NEQ 0 (
+        REM setx PATH replaced with reg add for GitHub Actions compatibility
+        reg add "HKCU\Environment" /v Path /t REG_EXPAND_SZ /d "!UserPath!;!ffmpegDir!" /f >nul 2>&1
+        set "PATH=!PATH!;!ffmpegDir!"
+        echo   [OK] Added !ffmpegDir! to user PATH
+    ) else (
+        echo   [OK] Already in PATH: !ffmpegDir!
+    )
 )
 
 for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "MachinePath=%%b"
