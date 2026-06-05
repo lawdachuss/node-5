@@ -332,20 +332,6 @@
             </div>
         </div>
 
-        <!-- Session countdown -->
-        <div id="session-timer" class="px-4 pb-3" data-deadline="{{ .SessionDeadlineUnix }}" data-duration="{{ .SessionDurationSec }}">
-            <div class="flex items-center gap-2 text-[11px] text-zinc-500">
-                <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                </svg>
-                <span class="font-medium tracking-wide uppercase">Session</span>
-                <span id="session-countdown" class="font-mono text-amber-400/90 ml-auto">--</span>
-            </div>
-            <div class="mt-1.5 h-0.5 rounded-full bg-white/5 overflow-hidden">
-                <div id="session-progress" class="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-1000" style="width:0%"></div>
-            </div>
-        </div>
-
         <!-- Channel list -->
         <div class="flex-1 flex flex-col overflow-hidden py-2 px-2">
             {{ if .Channels }}
@@ -1234,47 +1220,35 @@ document.querySelectorAll('.log-container').forEach(function(container) {
 
 // ── Session countdown ──
 (function() {
-    var el = document.getElementById('session-timer');
-    if (!el) return;
-    var deadline = parseInt(el.dataset.deadline) || 0;
-    var totalSec = parseInt(el.dataset.duration) || 1;
+    var deadline = {{ .SessionDeadlineUnix }};
+    var totalSec = {{ .SessionDurationSec }} || 1;
     var badgeTime = document.getElementById('session-badge-time');
     var cardTime = document.getElementById('session-card-time');
     var cardProgress = document.getElementById('session-card-progress');
-    var sidebarCountdown = document.getElementById('session-countdown');
-    var sidebarProgress = document.getElementById('session-progress');
+    if (!badgeTime || !cardTime || !cardProgress) return;
     function tick() {
         var now = Math.floor(Date.now() / 1000);
         var rem = deadline - now;
-        var isActive = deadline && rem > 0;
-        if (!isActive) {
+        if (!deadline || rem <= 0) {
             var txt = deadline ? 'Processing...' : '--';
-            if (sidebarCountdown) sidebarCountdown.textContent = txt;
-            if (sidebarProgress) sidebarProgress.style.width = '0%';
-            if (badgeTime) badgeTime.textContent = txt;
-            if (cardTime) cardTime.textContent = txt;
-            if (cardProgress) { cardProgress.style.width = '100%'; cardProgress.style.background = 'linear-gradient(90deg, #f59e0b, #f97316)'; }
+            badgeTime.textContent = txt;
+            cardTime.textContent = txt;
+            cardProgress.style.width = '100%';
+            cardProgress.style.background = 'linear-gradient(90deg, #f59e0b, #f97316)';
             return;
         }
         var h = Math.floor(rem / 3600);
         var m = Math.floor((rem % 3600) / 60);
         var s = rem % 60;
-        var short = h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
-        var full = h + 'h ' + (m < 10 ? '0' : '') + m + 'm ' + (s < 10 ? '0' : '') + 's';
-        var pct = ((totalSec - rem) / totalSec * 100);
-        if (sidebarCountdown) sidebarCountdown.textContent = full;
-        if (sidebarProgress) sidebarProgress.style.width = Math.min(pct, 100) + '%';
-        if (badgeTime) badgeTime.textContent = short;
-        if (cardTime) cardTime.textContent = full;
-        if (cardProgress) {
-            cardProgress.style.width = Math.min(pct, 100) + '%';
-            cardProgress.style.background = 'linear-gradient(90deg, #d4a053, #e8c06a)';
-        }
+        var pad = function(n) { return n < 10 ? '0' + n : n; };
+        badgeTime.textContent = h + 'h ' + pad(m) + 'm';
+        cardTime.textContent = h + 'h ' + pad(m) + 'm ' + pad(s) + 's';
+        cardProgress.style.width = ((totalSec - rem) / totalSec * 100) + '%';
+        cardProgress.style.background = 'linear-gradient(90deg, #d4a053, #e8c06a)';
     }
     tick();
     setInterval(tick, 1000);
 
-    // ── Floating clock toggle ──
     window.toggleSessionCard = function() {
         document.getElementById('session-card').classList.toggle('hidden');
     };
