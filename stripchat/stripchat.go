@@ -91,17 +91,26 @@ func (s *StripchatSite) FetchStream(ctx context.Context, req *internal.Req, user
 		}
 	}
 
-	// Stripchat does not have a live thumb endpoint like Chaturbate's
-	// thumb.live.mmcdn.com; previewUrlThumbBig is a static profile image
-	// that does not reflect the current stream. Leave LiveThumbURL empty
-	// so the thumb handler falls through to ffmpeg frame extraction,
-	// which captures a real frame from the active recording file.
+	// Set LiveThumbURL to the preview image so the frontend renders the
+	// <img src="/api/thumb/:username"> tag. The ServeLiveThumb handler will
+	// first extract a frame from the recording file via ffmpeg (giving a live
+	// stream frame), and fall back to proxying this URL when no recording is
+	// active (showing the static profile image rather than nothing at all).
+	thumbURL := u.PreviewUrlThumbBig
+	if thumbURL != "" {
+		if strings.Contains(thumbURL, "?") {
+			thumbURL = fmt.Sprintf("%s&t=%d", thumbURL, u.SnapshotTimestamp)
+		} else {
+			thumbURL = fmt.Sprintf("%s?t=%d", thumbURL, u.SnapshotTimestamp)
+		}
+	}
+
 	info := &site.StreamInfo{
 		RoomStatus:   roomStatus,
 		RoomTitle:    resp.Cam.Topic,
 		Tags:         tags,
 		Gender:       mapGender(u.BroadcastGender),
-		LiveThumbURL: "",
+		LiveThumbURL: thumbURL,
 	}
 
 	if !u.IsOnline && !u.IsLive {

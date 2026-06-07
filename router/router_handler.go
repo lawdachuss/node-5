@@ -927,41 +927,44 @@ func ServeLiveThumb(c *gin.Context) {
 	}
 
 	// Try to extract a frame from the most recent recording file.
+	// Stripchat LL-HLS recordings with separate audio use .video.mp4 suffix.
 	videoDir := server.Config.OutputDir
 	if videoDir == "" {
 		videoDir = "videos"
 	}
-	pattern := filepath.Join(videoDir, username+"_*.mp4")
-	matches, _ := filepath.Glob(pattern)
 	var newest string
 	var newestMod time.Time
-	for _, m := range matches {
-		st, err := os.Stat(m)
-		if err != nil || st.Size() < 100*1024 {
-			continue
-		}
-		if st.ModTime().After(newestMod) {
-			newest = m
-			newestMod = st.ModTime()
+	for _, pat := range []string{
+		filepath.Join(videoDir, username+"_*.mp4"),
+		filepath.Join(videoDir, username+"_*.video.mp4"),
+	} {
+		matches, _ := filepath.Glob(pat)
+		for _, m := range matches {
+			st, err := os.Stat(m)
+			if err != nil || st.Size() < 100*1024 {
+				continue
+			}
+			if st.ModTime().After(newestMod) {
+				newest = m
+				newestMod = st.ModTime()
+			}
 		}
 	}
 
 	// Only extract from files being actively recorded (< 60s since last write).
-	// Try sseof first (seeks near end by bytes, works with fMP4 absolute PTS),
-	// then fall back to the original -ss approach, then the upstream CDN.
+	// Try -ss first (most reliable for in-progress fMP4), then sseof fallback.
 	if newest != "" && time.Since(newestMod) < 60*time.Second {
 		cachePath := filepath.Join(os.TempDir(), "opencode-thumb-"+username+".jpg")
 		var thumbOK bool
 
-		// Attempt 1: seek near end of file (gives a recent frame for any container).
 		for attempt := 0; attempt < 2; attempt++ {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			config.AcquireFFmpeg()
 			args := []string{"-y"}
 			if attempt == 0 {
-				args = append(args, "-sseof", "-3")
+				args = append(args, "-ss", "00:00:00")
 			} else {
-				args = append(args, "-ss", "00:00:01")
+				args = append(args, "-sseof", "-3")
 			}
 			args = append(args,
 				"-i", newest,
