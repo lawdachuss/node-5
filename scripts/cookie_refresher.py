@@ -183,9 +183,10 @@ def main():
     session_kwargs = {
         "headless": True,
         "solve_cloudflare": True,
-        "timeout": 60000,
+        "timeout": 120000,
         "block_webrtc": True,
         "hide_canvas": True,
+        "network_idle": False,
     }
     if proxy:
         session_kwargs["proxy"] = proxy
@@ -194,16 +195,24 @@ def main():
     if cookie_str:
         session_kwargs["cookies"] = cookies_to_playwright_format(cookie_str)
 
-    try:
-        with StealthySession(**session_kwargs) as session:
-            session.fetch(
-                "https://chaturbate.com",
-                page_action=capture_cookies,
-                wait=5000,
-            )
-    except Exception as e:
-        print(f"  [WARN] Scrapling request failed: {e}")
-        return
+    max_retries = 2
+    for attempt in range(1, max_retries + 1):
+        try:
+            with StealthySession(**session_kwargs) as session:
+                session.fetch(
+                    "https://chaturbate.com",
+                    page_action=capture_cookies,
+                    wait=5000,
+                )
+            break  # success
+        except Exception as e:
+            print(f"  [WARN] Attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                print(f"  Retrying in 5s...")
+                time.sleep(5)
+            else:
+                print(f"  [ERROR] All attempts failed")
+                return
 
     if not new_browser_cookies:
         print("  [WARN] No cookies returned from browser — keeping existing")

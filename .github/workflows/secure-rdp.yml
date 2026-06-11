@@ -536,69 +536,43 @@ jobs:
               "",
               "while (`$true) {",
               "    Write-Host `"[Tunnel Wrapper] Starting cloudflared tunnel at `$(Get-Date)`"",
-              "    `$startInfo = New-Object System.Diagnostics.ProcessStartInfo",
-              "    `$startInfo.FileName = `$cloudflared",
-              "    `$startInfo.Arguments = `"tunnel --url http://localhost:8080 --protocol http2`"",
-              "    `$startInfo.WorkingDirectory = `$repoDir",
-              "    `$startInfo.UseShellExecute = `$false",
-              "    `$startInfo.RedirectStandardOutput = `$true",
-              "    `$startInfo.RedirectStandardError = `$true",
-              "    `$startInfo.CreateNoWindow = `$true",
-              "    `$proc = [System.Diagnostics.Process]::Start(`$startInfo)",
+              "    `$stderrFile = Join-Path `$repoDir `"cloudflared-stderr.log`"",
+              "    if (Test-Path `$stderrFile) { Remove-Item `$stderrFile -Force }",
               "",
-              "    # cloudflared prints the tunnel URL to STDERR, not stdout",
-              "    # Read stderr for the URL and log both streams",
+              "    # Use Start-Process with stderr redirect to file (simple and reliable)",
+              "    `$proc = Start-Process -FilePath `$cloudflared `",
+              "        -ArgumentList `"tunnel --url http://localhost:8080 --protocol http2`" `",
+              "        -WorkingDirectory `$repoDir `",
+              "        -NoNewWindow `",
+              "        -RedirectStandardError `$stderrFile `",
+              "        -PassThru",
+              "",
+              "    # Poll stderr file for tunnel URL (cloudflared prints it to stderr)",
               "    `$urlFound = `$false",
-              "    `$stderrTask = `nul",
-              "    # Start async reads from both streams",
-              "    `$stderrBuilder = New-Object System.Text.StringBuilder",
-              "    `$stdoutBuilder = New-Object System.Text.StringBuilder",
-              "",
-              "    # Use job-based async reading to avoid deadlocks",
-              "`$stderrJob = Start-Job -ScriptBlock {",
-              "    param(`$proc)",
-              "    while (-not `$proc.StandardError.EndOfStream) {",
-              "        `$line = `$proc.StandardError.ReadLine()",
-              "        `$line",
+              "    for (`$i = 0; `$i -lt 30; `$i++) {",
+              "        Start-Sleep -Seconds 2",
+              "        if (-not (Test-Path `$stderrFile)) { continue }",
+              "        `$content = Get-Content `$stderrFile -Raw -ErrorAction SilentlyContinue",
+              "        if (`$content -match 'https://[a-z0-9\\-]+\\.trycloudflare\\.com') {",
+              "            `$url = `$Matches[0]",
+              "            `$url | Set-Content -Path `$tunnelUrlFile -Force",
+              "            `$url | Out-File -FilePath `$logFile -Append",
+              "            Write-Host `"[Tunnel Wrapper] Tunnel URL: `$url`"",
+              "            `$urlFound = `$true",
+              "            break",
+              "        }",
               "    }",
-              "} -ArgumentList `$proc",
-              "`$stdoutJob = Start-Job -ScriptBlock {",
-              "    param(`$proc)",
-              "    while (-not `$proc.StandardOutput.EndOfStream) {",
-              "        `$line = `$proc.StandardOutput.ReadLine()",
-              "        `$line",
+              "",
+              "    if (-not `$urlFound) {",
+              "        `$errContent = Get-Content `$stderrFile -Raw -ErrorAction SilentlyContinue",
+              "        if (`$errContent) { `$errContent | Out-File -FilePath `$logFile -Append }",
+              "        Write-Host `"[Tunnel Wrapper] No URL found, restarting in 10s...`"",
               "    }",
-              "} -ArgumentList `$proc",
               "",
-              "# Wait for process to exit, then collect job output",
-              "`$proc.WaitForExit()",
-              "Start-Sleep -Seconds 2",
-              "",
-              "`$stderrLines = Receive-Job `$stderrJob -ErrorAction SilentlyContinue",
-              "`$stdoutLines = Receive-Job `$stdoutJob -ErrorAction SilentlyContinue",
-              "Remove-Job `$stderrJob -Force -ErrorAction SilentlyContinue",
-              "Remove-Job `$stdoutJob -Force -ErrorAction SilentlyContinue",
-              "",
-              "# Log all output",
-              "if (`$stderrLines) { `$stderrLines | Out-File -FilePath `$logFile -Append }",
-              "if (`$stdoutLines) { `$stdoutLines | Out-File -FilePath `$logFile -Append }",
-              "",
-              "# Check stderr for tunnel URL (cloudflared writes URL to stderr)",
-              "foreach (`$line in @(`$stderrLines)) {",
-              "    if (`$line -match 'https://[a-z0-9\\-]+\\.trycloudflare\\.com') {",
-              "        `$url = `$Matches[0]",
-              "        `$url | Set-Content -Path `$tunnelUrlFile -Force",
-              "        Write-Host `"[Tunnel Wrapper] Tunnel URL: `$url`"",
-              "        `$urlFound = `$true",
-              "        break",
-              "    }",
-              "}",
-              "if (-not `$urlFound) {",
-              "    Write-Host `"[Tunnel Wrapper] Tunnel failed or disconnected, restarting in 10s...`"",
-              "} else {",
+              "    # Wait for process to exit (tunnel disconnected)",
+              "    `$proc.WaitForExit()",
               "    Write-Host `"[Tunnel Wrapper] Tunnel disconnected, restarting in 10s...`"",
-              "}",
-              "Start-Sleep -Seconds 10",
+              "    Start-Sleep -Seconds 10",
               "}"
             )
             $tunnelWrapperContent = $tunnelWrapperLines -join "`r`n"
@@ -768,6 +742,7 @@ jobs:
           
           # ====== START DVR ======
           Write-Host "=== Starting DVR ==="
+          Set-Location $repoDir
           
           $backupHTTP = $env:HTTP_PROXY
           $backupHTTPS = $env:HTTPS_PROXY
@@ -776,7 +751,15 @@ jobs:
           Remove-Item Env:http_proxy -ErrorAction SilentlyContinue
           Remove-Item Env:https_proxy -ErrorAction SilentlyContinue
           
-          $dvrProcess = Start-Process -FilePath $dvrExe -ArgumentList "--no-tunnel --output-dir `"$videosDir`"" -NoNewWindow -RedirectStandardOutput $dvrLog -RedirectStandardError "$repoDir\dvr-err.log" -PassThru
+          # Verify .env exists before starting DVR
+          if (Test-Path "$repoDir\.env") {
+            $envSize = (Get-Item "$repoDir\.env").Length
+            Write-Host "[OK] .env file found ($envSize bytes)"
+          } else {
+            Write-Warning ".env file NOT found at $repoDir\.env"
+          }
+          
+          $dvrProcess = Start-Process -FilePath $dvrExe -ArgumentList "--no-tunnel --output-dir `"$videosDir`"" -WorkingDirectory $repoDir -NoNewWindow -RedirectStandardOutput $dvrLog -RedirectStandardError "$repoDir\dvr-err.log" -PassThru
           Write-Host "[OK] DVR PID: $($dvrProcess.Id)"
           
           if ($backupHTTP) { $env:HTTP_PROXY = $backupHTTP }

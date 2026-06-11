@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -47,10 +48,18 @@ var version = "dev"
 
 // loadDotEnv loads KEY=VALUE pairs from a .env file into the process environment,
 // but does NOT overwrite existing environment variables.
+// It tries the given path first, then falls back to the executable's directory.
 func loadDotEnv(path string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return
+		// Try relative to executable directory
+		exe, err2 := os.Executable()
+		if err2 == nil {
+			f, err = os.Open(filepath.Join(filepath.Dir(exe), path))
+		}
+		if err != nil {
+			return
+		}
 	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
