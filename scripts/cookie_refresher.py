@@ -99,22 +99,43 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
     impersonate = "chrome124"
     session_cookies = {}
 
+    proxies = None
+    if proxy:
+        # curl_cffi uses socks5h:// for DNS resolution through proxy
+        if proxy.startswith("socks5://"):
+            proxy_h = proxy.replace("socks5://", "socks5h://", 1)
+        else:
+            proxy_h = proxy
+        proxies = {"https": proxy_h, "http": proxy_h}
+        print(f"  Using proxy: {proxy}")
+
     # First: visit chaturbate.com to get initial cookies
     try:
         resp = cffi_requests.get(
             "https://chaturbate.com",
             impersonate=impersonate,
-            timeout=30,
-            proxies={"https": proxy, "http": proxy} if proxy else None,
+            timeout=60,
+            proxies=proxies,
             headers={"User-Agent": user_agent} if user_agent else None,
+            allow_redirects=True,
         )
-        print(f"  curl_cffi status: {resp.status_code}")
+        print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
 
         # Extract cookies from response
         if hasattr(resp, "cookies"):
             for name, value in resp.cookies.items():
                 session_cookies[name] = value
-                print(f"    Cookie: {name}={value[:20]}...")
+                print(f"    Cookie: {name}={value[:30]}...")
+
+        # Also check Set-Cookie headers directly
+        if hasattr(resp, "headers"):
+            for header_val in resp.headers.get_list("set-cookie"):
+                if "=" in header_val:
+                    name = header_val.split("=")[0].strip()
+                    value = header_val.split("=", 1)[1].split(";")[0].strip()
+                    if name and value and name not in session_cookies:
+                        session_cookies[name] = value
+                        print(f"    Cookie (header): {name}={value[:30]}...")
 
     except Exception as e:
         print(f"  [WARN] curl_cffi request failed: {e}")
