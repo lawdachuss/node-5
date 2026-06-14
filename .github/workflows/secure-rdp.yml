@@ -814,7 +814,7 @@ jobs:
           Write-Host "=== Starting Cloudflare tunnel ==="
           $tunnelUrl = $null
           if (Test-Path $cloudflaredPath) {
-            # Run cloudflared directly — capture stderr for tunnel URL
+            # Run cloudflared directly - capture stderr for tunnel URL
             $cloudflaredStderr = "$repoDir\cloudflared-stderr.log"
             if (Test-Path $cloudflaredStderr) { Remove-Item $cloudflaredStderr -Force }
             
@@ -940,10 +940,10 @@ jobs:
           while (-not (Test-Path $uploadFlag)) {
             $waited = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $waitStart
             if ($waited -ge $maxWaitSecs) {
-              Write-Host "[WARNING] Upload wait timeout ($maxWaitSecs s) — proceeding anyway. Some uploads may still be in progress."
+              Write-Host ("[WARNING] Upload wait timeout ($maxWaitSecs s) - proceeding anyway. Some uploads may still be in progress.")
               break
             }
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Waiting for upload-complete.flag... ($waited s elapsed)"
+            Write-Host ("[{0}] Waiting for upload-complete.flag... ({1} s elapsed)" -f (Get-Date -Format 'HH:mm:ss'), $waited)
             Start-Sleep -Seconds 15
           }
           if (Test-Path $uploadFlag) {
