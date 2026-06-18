@@ -26,6 +26,11 @@ const (
 //
 // Call this once during startup.
 func StartDiskMonitor(stop <-chan struct{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[DISK] PANIC in disk monitor: %v", r)
+		}
+	}()
 	ticker := time.NewTicker(diskMonitorInterval)
 	defer ticker.Stop()
 

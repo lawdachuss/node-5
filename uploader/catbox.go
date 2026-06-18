@@ -62,37 +62,45 @@ func (u *CatboxUploader) Upload(filePath string) (string, error) {
 }
 
 // uploadOnce performs a single upload attempt without retry logic.
+// The file is streamed through an io.Pipe so large images are never buffered
+// in RAM — only the multipart preamble (headers + form fields) is assembled
+// upfront, which is always small (< 1 KB).
 func (u *CatboxUploader) uploadOnce(filePath string) (string, error) {
+	fi, err := os.Stat(filePath)
+	if err != nil {
+		return "", fmt.Errorf("catbox: stat file: %w", err)
+	}
+
+	// Build the multipart preamble (all headers and form fields, but NOT the
+	// file bytes) into a small buffer so we can compute the exact Content-Length
+	// and avoid chunked transfer encoding.
+	var preamble bytes.Buffer
+	mw := multipart.NewWriter(&preamble)
+
+	if err := mw.WriteField("reqtype", "fileupload"); err != nil {
+		return "", fmt.Errorf("catbox: write reqtype: %w", err)
+	}
+	if _, err := mw.CreateFormFile("fileToUpload", filepath.Base(filePath)); err != nil {
+		return "", fmt.Errorf("catbox: create form file: %w", err)
+	}
+	closing := fmt.Sprintf("\r\n--%s--\r\n", mw.Boundary())
+	contentType := mw.FormDataContentType()
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("catbox: open file: %w", err)
 	}
 	defer file.Close()
 
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
+	totalLen := int64(preamble.Len()) + fi.Size() + int64(len(closing))
+	body := io.MultiReader(&preamble, file, bytes.NewReader([]byte(closing)))
 
-	// reqtype=fileupload is always required for file uploads
-	if err := writer.WriteField("reqtype", "fileupload"); err != nil {
-		return "", fmt.Errorf("catbox: write reqtype: %w", err)
-	}
-
-	part, err := writer.CreateFormFile("fileToUpload", filepath.Base(filePath))
-	if err != nil {
-		return "", fmt.Errorf("catbox: create form file: %w", err)
-	}
-	if _, err := io.Copy(part, file); err != nil {
-		return "", fmt.Errorf("catbox: copy file: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("catbox: close writer: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", "https://catbox.moe/user/api.php", &buf)
+	req, err := http.NewRequest("POST", "https://catbox.moe/user/api.php", body)
 	if err != nil {
 		return "", fmt.Errorf("catbox: create request: %w", err)
 	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.ContentLength = totalLen
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", defaultUserAgent)
 
 	resp, err := u.client.Do(req)
@@ -101,24 +109,21 @@ func (u *CatboxUploader) uploadOnce(filePath string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024)) // 64KB max response
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024)) // 64KB max response
 	if err != nil {
 		return "", fmt.Errorf("catbox: read response: %w", err)
 	}
 
-	text := strings.TrimSpace(string(body))
+	text := strings.TrimSpace(string(raw))
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("catbox: status %d: %s", resp.StatusCode, text)
 	}
 
-	// Catbox returns the URL as plain text on success.
-	// On error it returns a message like "Missing reqtype" or "No file selected".
 	if text == "" {
 		return "", fmt.Errorf("catbox: empty response")
 	}
 
-	// Catbox returns the URL directly — no JSON wrapping.
 	if !strings.HasPrefix(text, "https://") {
 		return "", fmt.Errorf("catbox: unexpected response: %s", text)
 	}

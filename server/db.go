@@ -163,12 +163,13 @@ func saveJSONSetting(key string, data []byte) error {
 	patchRespBody, _ := io.ReadAll(patchResp.Body)
 	if patchResp.StatusCode >= 400 {
 		return fmt.Errorf("patch returned %d: %s", patchResp.StatusCode, string(patchRespBody))
-	}
-
-	// Supabase returns "[]" when PATCH matched zero rows.
+	}	// Supabase returns "[]" when PATCH matched zero rows.
 	if strings.TrimSpace(string(patchRespBody)) == "[]" {
 		// Row doesn't exist yet — INSERT it.
-		insertResp, err := supabaseRequestWithPrefer("POST", "/app_settings", insertBody, "return=minimal")
+		// Include resolution=merge-duplicates so a concurrent writer that
+		// inserted the row between our PATCH (found none) and this POST
+		// does not cause a unique-constraint violation.
+		insertResp, err := supabaseRequestWithPrefer("POST", "/app_settings", insertBody, "resolution=merge-duplicates, return=minimal")
 		if err != nil {
 			return fmt.Errorf("insert request: %w", err)
 		}

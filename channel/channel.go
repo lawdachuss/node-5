@@ -113,6 +113,13 @@ func New(conf *entity.ChannelConfig) *Channel {
 // Progress updates are coalesced so busy channels do not repaint the UI more
 // often than a person can read it.
 func (ch *Channel) Publisher() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC [%s] publisher: %v", ch.Config.Username, r)
+			// Restart the publisher so the channel stays responsive.
+			go ch.Publisher()
+		}
+	}()
 	updateTimer := time.NewTimer(0)
 	if !updateTimer.Stop() {
 		<-updateTimer.C
@@ -464,6 +471,11 @@ func resolveSite(ch *Channel) site.Site {
 // CheckOnlineWhilePaused periodically refreshes room status for paused channels
 // so the UI can still distinguish online/private/offline states.
 func (ch *Channel) CheckOnlineWhilePaused(ctx context.Context, startSeq int) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC [%s] check-online: %v", ch.Config.Username, r)
+		}
+	}()
 	siteImpl := resolveSite(ch)
 	req := internal.NewReq()
 	baseIntervalMinutes := max(server.Config.Interval, 15)

@@ -79,7 +79,7 @@ type CreateChannelRequest struct {
 func CreateChannel(c *gin.Context) {
         var req *CreateChannelRequest
         if err := c.Bind(&req); err != nil {
-                c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
+                c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("bind: %v", err)})
                 return
         }
 
@@ -166,7 +166,7 @@ type UpdateConfigRequest struct {
 func UpdateConfig(c *gin.Context) {
         var req UpdateConfigRequest
         if err := c.ShouldBind(&req); err != nil {
-                c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
+                c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("bind: %v", err)})
                 return
         }
 
@@ -302,6 +302,7 @@ func DeleteVideoRecord(c *gin.Context) {
         if err := server.DeleteVideoCompletely(filename); err != nil {
                 fmt.Printf("[ERROR] delete video DB records for %s: %v\n", filename, err)
         }
+        InvalidateVideosCache()
         c.Redirect(http.StatusFound, "/videos")
 }
 
@@ -335,6 +336,7 @@ func DeleteVideo(c *gin.Context) {
                 fmt.Printf("[ERROR] delete video DB records for %s: %v\n", filename, err)
         }
 
+        InvalidateVideosCache()
         c.Redirect(http.StatusFound, "/videos")
 }
 
@@ -731,7 +733,7 @@ type tunnelRequest struct {
 func UpdateTunnel(c *gin.Context) {
         var req tunnelRequest
         if err := c.ShouldBind(&req); err != nil {
-                c.AbortWithError(http.StatusBadRequest, fmt.Errorf("bind: %w", err))
+                c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("bind: %v", err)})
                 return
         }
         if req.URL == "" {

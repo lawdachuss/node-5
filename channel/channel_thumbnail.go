@@ -119,6 +119,12 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	// ── Single thumbnail (static frame near the 10% mark) ──────────────────
 	// Independent 90-second context: seeking to a single frame is always fast.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC [thumb] generating thumbnail for %s: %v", baseName, r)
+				thumbDone <- ""
+			}
+		}()
 		thumbCtx, thumbCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer thumbCancel()
 
@@ -172,6 +178,12 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	// slow or resource-constrained host.  A short shared context would cause
 	// SIGKILL ("signal: killed") and silently skip sprite generation.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC [sprite] generating sprite for %s: %v", baseName, r)
+				spriteDone <- ""
+			}
+		}()
 		spriteCtx, spriteCancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer spriteCancel()
 
@@ -228,6 +240,12 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	// For short videos (<5 s) fps is capped at previewFPS (8) for smooth playback.
 	// Same 15-minute timeout as the sprite for long videos.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC [preview] generating preview for %s: %v", baseName, r)
+				previewDone <- ""
+			}
+		}()
 		previewCtx, previewCancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer previewCancel()
 
