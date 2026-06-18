@@ -41,6 +41,10 @@ func NewThumbnailUploader(apiKey string) *ThumbnailUploader {
 // Upload uploads a thumbnail image to Pixhost.to and returns the direct image URL.
 // Pixhost only supports JPEG, PNG, and GIF — WebP files are rejected with a fast
 // error so the caller can fall through to hosts that support WebP (e.g. Catbox.moe).
+//
+// The file is opened once and streamed through both upload strategies without
+// loading the entire image into RAM.  Only the multipart preamble (headers +
+// form fields, < 512 B) is buffered in memory.
 func (t *ThumbnailUploader) Upload(thumbnailPath string) (string, error) {
 	log.Printf("Uploading thumbnail to Pixhost.to: %s", thumbnailPath)
 
@@ -51,69 +55,83 @@ func (t *ThumbnailUploader) Upload(thumbnailPath string) (string, error) {
 		return "", fmt.Errorf("Pixhost does not support WebP format — use a host that supports it (e.g. Catbox.moe)")
 	}
 
-	fileData, err := os.ReadFile(thumbnailPath)
+	fi, err := os.Stat(thumbnailPath)
 	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
+		return "", fmt.Errorf("stat file: %w", err)
+	}
+	fileSize := fi.Size()
+
+	file, err := os.Open(thumbnailPath)
+	if err != nil {
+		return "", fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+
+	// Build the multipart preamble once — shared across strategy retries.
+	// Contains form fields + file part header but NOT the file bytes.
+	var preamble bytes.Buffer
+	mw := multipart.NewWriter(&preamble)
+	if err := mw.WriteField("content_type", "1"); err != nil {
+		return "", fmt.Errorf("write content_type: %w", err)
+	}
+	if err := mw.WriteField("max_th_size", "420"); err != nil {
+		return "", fmt.Errorf("write max_th_size: %w", err)
+	}
+	if _, err := mw.CreateFormFile("img", filepath.Base(thumbnailPath)); err != nil {
+		return "", fmt.Errorf("create form file: %w", err)
+	}
+	closing := fmt.Sprintf("\r\n--%s--\r\n", mw.Boundary())
+	contentType := mw.FormDataContentType()
+
+	// MIME type for the raw body fallback strategy.
+	ext := strings.ToLower(filepath.Ext(thumbnailPath))
+	mimeType := "application/octet-stream"
+	switch ext {
+	case ".webp":
+		mimeType = "image/webp"
+	case ".jpg", ".jpeg":
+		mimeType = "image/jpeg"
+	case ".png":
+		mimeType = "image/png"
 	}
 
-	// Try each upload strategy in order until one succeeds.
-	// Strategy 1: multipart/form-data with fields before file (Pixhost prefers this order)
-	// Strategy 2: raw binary body with proper Content-Type (fallback for CDN issues)
+	// Body reader helpers — seek the file back before each use.
+	multipartBody := func() io.Reader {
+		file.Seek(0, io.SeekStart)
+		return io.MultiReader(
+			bytes.NewReader(preamble.Bytes()),
+			file,
+			bytes.NewReader([]byte(closing)),
+		)
+	}
+	rawBody := func() io.Reader {
+		file.Seek(0, io.SeekStart)
+		return file
+	}
+
 	var lastErr error
 	strategies := []struct {
 		name string
 		fn   func() (*http.Response, error)
 	}{
 		{"multipart", func() (*http.Response, error) {
-			var buf bytes.Buffer
-			writer := multipart.NewWriter(&buf)
-
-			// Write form fields FIRST (some APIs require fields before file part)
-			if err := writer.WriteField("content_type", "1"); err != nil {
-				return nil, fmt.Errorf("write content_type: %w", err)
-			}
-			if err := writer.WriteField("max_th_size", "420"); err != nil {
-				return nil, fmt.Errorf("write max_th_size: %w", err)
-			}
-
-			part, err := writer.CreateFormFile("img", filepath.Base(thumbnailPath))
-			if err != nil {
-				return nil, fmt.Errorf("create form file: %w", err)
-			}
-			if _, err := io.Copy(part, bytes.NewReader(fileData)); err != nil {
-				return nil, fmt.Errorf("copy file: %w", err)
-			}
-			if err := writer.Close(); err != nil {
-				return nil, fmt.Errorf("close writer: %w", err)
-			}
-
-			req, err := http.NewRequest("POST", "https://api.pixhost.to/images", &buf)
+			totalLen := int64(preamble.Len()) + fileSize + int64(len(closing))
+			req, err := http.NewRequest("POST", "https://api.pixhost.to/images", multipartBody())
 			if err != nil {
 				return nil, fmt.Errorf("create request: %w", err)
 			}
-			req.Header.Set("Content-Type", writer.FormDataContentType())
+			req.ContentLength = totalLen
+			req.Header.Set("Content-Type", contentType)
 			req.Header.Set("Accept", "application/json")
 			req.Header.Set("User-Agent", defaultUserAgent)
 			return t.client.Do(req)
 		}},
 		{"raw body", func() (*http.Response, error) {
-			// Fallback: send raw file bytes with Content-Type set to the image type.
-			// Some CDNs handle raw body uploads better than multipart.
-			ext := strings.ToLower(filepath.Ext(thumbnailPath))
-			mimeType := "application/octet-stream"
-			switch ext {
-			case ".webp":
-				mimeType = "image/webp"
-			case ".jpg", ".jpeg":
-				mimeType = "image/jpeg"
-			case ".png":
-				mimeType = "image/png"
-			}
-
-			req, err := http.NewRequest("POST", "https://api.pixhost.to/images", bytes.NewReader(fileData))
+			req, err := http.NewRequest("POST", "https://api.pixhost.to/images", rawBody())
 			if err != nil {
 				return nil, fmt.Errorf("create raw request: %w", err)
 			}
+			req.ContentLength = fileSize
 			req.Header.Set("Content-Type", mimeType)
 			req.Header.Set("Accept", "application/json")
 			req.Header.Set("User-Agent", defaultUserAgent)

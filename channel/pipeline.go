@@ -535,25 +535,6 @@ func (pq *PipelineQueue) startOnce() {
 	pq.mu.Unlock()
 }
 
-// Enqueue adds a pipeline for processing. It persists the initial state
-// to Supabase so interrupted pipelines can be recovered on restart.
-func (pq *PipelineQueue) Enqueue(p *Pipeline) {
-	pq.startOnce()
-	if hErr := server.SavePipelineState(p.toDBState()); hErr != nil {
-		pq.ch.Warn("pipeline: could not persist initial state for %s: %v", p.Filename, hErr)
-	}
-	pq.mu.Lock()
-	pq.pipelines = append(pq.pipelines, p)
-	pq.mu.Unlock()
-	pq.cond.Signal()
-}
-
-// Start launches the worker goroutine that processes pipelines.
-func (pq *PipelineQueue) Start() {
-	pq.wg.Add(1)
-	go pq.processLoop()
-}
-
 // Stop signals the worker to finish after draining the queue.
 func (pq *PipelineQueue) Stop() {
 	pq.mu.Lock()
