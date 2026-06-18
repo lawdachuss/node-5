@@ -145,73 +145,6 @@ func supabasePost(path string, body interface{}) error {
 	return nil
 }
 
-func extractPixelDrainID(rawURL string) string {
-	trimmed := strings.TrimRight(rawURL, "/")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) == 0 {
-		return ""
-	}
-	return parts[len(parts)-1]
-}
-
-func downloadFromPixelDrain(uploadURL, destDir string) (string, error) {
-	fileID := extractPixelDrainID(uploadURL)
-	if fileID == "" {
-		return "", fmt.Errorf("could not extract file ID from %s", uploadURL)
-	}
-	apiURL := fmt.Sprintf("https://pixeldrain.com/api/file/%s", fileID)
-	log.Printf("  downloading from PixelDrain: %s", apiURL)
-
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-	client := &http.Client{
-		Timeout: 30 * time.Minute,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return nil
-		},
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("download request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	filename := fileID + ".mp4"
-	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-		if strings.Contains(cd, "filename=") {
-			parts := strings.Split(cd, "filename=")
-			if len(parts) > 1 {
-				fn := strings.Trim(parts[len(parts)-1], "\" ;")
-				if fn != "" {
-					filename = fn
-				}
-			}
-		}
-	}
-
-	destPath := filepath.Join(destDir, filename)
-	out, err := os.Create(destPath)
-	if err != nil {
-		return "", fmt.Errorf("create file: %w", err)
-	}
-	defer out.Close()
-
-	written, err := io.Copy(out, resp.Body)
-	if err != nil {
-		os.Remove(destPath)
-		return "", fmt.Errorf("save file: %w", err)
-	}
-	log.Printf("  downloaded %d bytes to %s", written, destPath)
-	return destPath, nil
-}
 
 func downloadWithYtDlp(pageURL, workDir, filename string) (string, error) {
 	if _, lookErr := exec.LookPath("yt-dlp"); lookErr != nil {
@@ -375,18 +308,7 @@ func main() {
 
 		var localPath string
 
-		// Try PixelDrain direct download first
-		for _, l := range links {
-			if strings.EqualFold(l.Host, "PixelDrain") {
-				localPath, err = downloadFromPixelDrain(l.URL, workDir)
-				if err != nil {
-					log.Printf("  PixelDrain failed: %v", err)
-				}
-				break
-			}
-		}
-
-		// Fallback: yt-dlp for any host
+		// Try yt-dlp for any host (fallback)
 		if localPath == "" {
 			for _, l := range links {
 				localPath, err = downloadWithYtDlp(l.URL, workDir, r.Filename)

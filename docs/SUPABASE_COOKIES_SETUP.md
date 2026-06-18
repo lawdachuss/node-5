@@ -203,7 +203,6 @@ CREATE TABLE app_settings (
   "streamtape_key": "...",
   "mixdrop_email": "...",
   "mixdrop_token": "...",
-  "pixeldrain_token": "..."
 }
 ```
 

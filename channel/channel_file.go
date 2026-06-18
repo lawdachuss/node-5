@@ -317,7 +317,9 @@ func videoExt(name string) bool {
 // .video.mp4 and .audio.mp4 are raw A/V track files (sidecars).
 func isSidecar(name string) bool {
 	return strings.HasSuffix(name, ".thumb.webp") ||
+		strings.HasSuffix(name, ".thumb.jpg") ||
 		strings.HasSuffix(name, ".sprite.webp") ||
+		strings.HasSuffix(name, ".sprite.jpg") ||
 		strings.HasSuffix(name, ".preview.webp") ||
 		strings.HasSuffix(name, ".thumb") ||
 		strings.HasSuffix(name, ".sprite") ||
@@ -791,7 +793,7 @@ func CleanupOrphanedFiles() {
 		processAllPendingSegments()
 
 		// Clean up orphaned sidecar files whose main video no longer exists
-		sidecarExts := []string{".thumb.webp", ".sprite.webp", ".preview.webp", ".thumb", ".sprite"}
+		sidecarExts := []string{".thumb.webp", ".thumb.jpg", ".sprite.webp", ".sprite.jpg", ".preview.webp", ".thumb", ".sprite"}
 		for _, e := range entries {
 			if e.IsDir() {
 				continue
@@ -821,7 +823,7 @@ func CleanupOrphanedFiles() {
 
 // DeleteSidecarFiles removes preview sidecar files associated with a video path.
 func DeleteSidecarFiles(videoPath string) {
-	for _, suffix := range []string{".thumb.webp", ".sprite.webp", ".preview.webp", ".thumb", ".sprite"} {
+	for _, suffix := range []string{".thumb.webp", ".thumb.jpg", ".sprite.webp", ".sprite.jpg", ".preview.webp", ".thumb", ".sprite"} {
 		os.Remove(videoPath + suffix)
 	}
 }
@@ -988,9 +990,6 @@ func configuredUploadHosts() []string {
 	if cfg.MixdropEmail != "" && cfg.MixdropToken != "" {
 		hosts = append(hosts, "Mixdrop")
 	}
-	if cfg.PixelDrainToken != "" {
-		hosts = append(hosts, "PixelDrain")
-	}
 	return hosts
 }
 
@@ -1049,7 +1048,6 @@ func UploadOrphanedFile(filePath, thumbURL, spriteURL, previewURL string) bool {
 		cfg.StreamtapeKey,
 		cfg.MixdropEmail,
 		cfg.MixdropToken,
-		cfg.PixelDrainToken,
 		nil, // no logger for orphan recovery
 	)
 

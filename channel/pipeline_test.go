@@ -34,7 +34,6 @@ func TestPipelineCleanupDeletesWithAnyLink(t *testing.T) {
 	defer func() { server.Config = oldConfig }()
 	server.Config = &entity.Config{
 		DeleteLocalAfterUpload: true,
-		PixelDrainToken:        "configured",
 	}
 
 	dir := t.TempDir()

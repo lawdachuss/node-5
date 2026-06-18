@@ -84,7 +84,6 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL, previewURL s
 		cfg.StreamtapeKey,
 		cfg.MixdropEmail,
 		cfg.MixdropToken,
-		cfg.PixelDrainToken,
 		ch, // Channel implements uploader.Logger
 	)
 
@@ -239,7 +238,7 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL, previewURL s
 		if server.Config != nil && server.Config.DeleteLocalAfterUpload && len(success) > 0 && dbSaved {
 			_ = os.Remove(filePath)
 			// Also clean up any associated preview sidecar files
-			for _, suffix := range []string{".thumb.webp", ".sprite.webp", ".preview.webp", ".thumb", ".sprite"} {
+			for _, suffix := range []string{".thumb.webp", ".thumb.jpg", ".sprite.webp", ".sprite.jpg", ".preview.webp", ".thumb", ".sprite"} {
 				_ = os.Remove(filePath + suffix)
 			}
 			// Clean up journal entries since local file is gone

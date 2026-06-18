@@ -98,7 +98,9 @@ func videoExt(name string) bool {
 // .video.mp4 and .audio.mp4 are raw A/V track files (sidecars).
 func isSidecar(name string) bool {
 	return strings.HasSuffix(name, ".thumb.webp") ||
+		strings.HasSuffix(name, ".thumb.jpg") ||
 		strings.HasSuffix(name, ".sprite.webp") ||
+		strings.HasSuffix(name, ".sprite.jpg") ||
 		strings.HasSuffix(name, ".preview.webp") ||
 		strings.HasSuffix(name, ".thumb") ||
 		strings.HasSuffix(name, ".sprite") ||

@@ -7,7 +7,7 @@ A high-performance, always-on stream recorder and video manager for Chaturbate a
 - **Multi-site recording** — Chaturbate and Stripchat via a pluggable `site.Site` interface
 - **HLS segment downloading** — Downloads raw TS/M4S segments directly from CDN edges with automatic failover across multiple CDN regions (lax, fra, AMS, sin, hnd)
 - **GPU-accelerated compression** — Automatic encoder detection: NVENC (NVIDIA) > AMF (AMD) > QSV (Intel) > VideoToolbox (macOS) > CPU fallback via mp4ff muxer
-- **Multi-host uploading** — Parallel uploads to GoFile, Streamtape, VOE.sx, MixDrop, Pixeldrain with file-hash deduplication
+- **Multi-host uploading** — Parallel uploads to GoFile, Streamtape, VOE.sx, MixDrop with file-hash deduplication
 - **Crash-recoverable pipeline** — Post-recording pipeline (Thumbnail → Metadata → Cleanup) persisted in Supabase, survives restarts
 - **Thumbnail generation** — Static thumbnails (1280×720), sprite sheets (4×4 grid), and animated GIF previews (40 frames, 8fps)
 - **Built-in web UI** — Dark-mode dashboard with live channel logs (SSE), video browser, and player with HLS support
@@ -96,7 +96,6 @@ Place these in the `conf/` directory:
   "enable_streamtape_upload": false,
   "enable_voesx_upload": false,
   "enable_mixdrop_upload": false,
-  "enable_pixeldrain_upload": false
 }
 ```
 
@@ -297,7 +296,7 @@ cd MiniDelectableService
 | **Video Muxing** | mp4ff |
 | **HLS Parsing** | Go standard library |
 | **File Watching** | fsnotify |
-| **Upload Hosts** | GoFile, Streamtape, VOE.sx, MixDrop, Pixeldrain |
+| **Upload Hosts** | GoFile, Streamtape, VOE.sx, MixDrop |
 | **Tunnel** | Cloudflare (cloudflared) |
 | **Networking** | Tailscale |
 | **CI/CD** | GitHub Actions |

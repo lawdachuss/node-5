@@ -170,7 +170,6 @@ type Config struct {
 	StreamtapeKey     string
 	MixdropEmail      string
 	MixdropToken      string
-	PixelDrainToken   string
 
 	SupabaseURL    string
 	SupabaseAPIKey string

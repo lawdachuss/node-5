@@ -229,7 +229,6 @@ func New(c *cli.Context) (*entity.Config, error) {
 		StreamtapeKey:           c.String("streamtape-key"),
 		MixdropEmail:            c.String("mixdrop-email"),
 		MixdropToken:            c.String("mixdrop-token"),
-		PixelDrainToken:         c.String("pixeldrain-token"),
 		SupabaseURL:             c.String("supabase-url"),
 		SupabaseAPIKey:          c.String("supabase-api-key"),
 		StripchatPDKey:          c.String("stripchat-pdkey"),

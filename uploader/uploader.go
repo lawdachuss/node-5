@@ -37,7 +37,7 @@ func newNoProxyClient(timeout time.Duration) *http.Client {
 
 // multipartStream builds a multipart request body that streams the file without
 // loading it into RAM, while still setting an exact Content-Length so servers
-// that reject chunked transfer encoding (Streamtape, Mixdrop, Pixeldrain) work.
+// that reject chunked transfer encoding (Streamtape, Mixdrop) work.
 //
 // fields is written before the file part (may be nil).
 // If host is non-empty the file part is wrapped with a ProgressReader.
@@ -107,7 +107,6 @@ type MultiHostUploader struct {
 	voesx      *VoeSXUploader
 	streamtape *StreamtapeUploader
 	mixdrop    *MixdropUploader
-	pixeldrain *PixeldrainUploader
 	log        Logger
 	hosts      map[string]uploaderFunc // host name -> upload function, lazy-init
 	progress   ProgressFunc
@@ -130,13 +129,10 @@ func (m *MultiHostUploader) initHosts() {
 	if m.mixdrop != nil && m.mixdrop.email != "" && m.mixdrop.token != "" {
 		m.hosts["Mixdrop"] = m.mixdrop.UploadWithProgress
 	}
-	if m.pixeldrain != nil && m.pixeldrain.token != "" {
-		m.hosts["PixelDrain"] = m.pixeldrain.UploadWithProgress
-	}
 }
 
 // NewMultiHostUploader creates a new multi-host uploader
-func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken, pixeldrainToken string, log Logger) *MultiHostUploader {
+func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken string, log Logger) *MultiHostUploader {
 	if log == nil {
 		log = &nilLogger{}
 	}
@@ -145,7 +141,6 @@ func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEm
 		voesx:      NewVoeSXUploader(voeSXAPIKey),
 		streamtape: NewStreamtapeUploader(streamtapeLogin, streamtapeKey),
 		mixdrop:    NewMixdropUploader(mixdropEmail, mixdropToken),
-		pixeldrain: NewPixeldrainUploader(pixeldrainToken),
 		log:        log,
 	}
 }

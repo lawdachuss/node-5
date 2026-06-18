@@ -189,7 +189,6 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 		cfg.StreamtapeKey,
 		cfg.MixdropEmail,
 		cfg.MixdropToken,
-		cfg.PixelDrainToken,
 		ch,
 	)
 
@@ -317,10 +316,7 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 			break
 		}
 		var attemptResults []uploader.UploadResult
-		// Phase 3: Upload PixelDrain first so it gets full bandwidth during
-		// shutdown. If the process is killed mid-upload, PixelDrain is most
-		// likely to have completed.
-		attemptResults = upl.UploadSelectedPriority(filePath, hostsToTry, "PixelDrain")
+		attemptResults = upl.UploadSelected(filePath, hostsToTry)
 		results = append(results, attemptResults...)
 
 		success = uploader.GetSuccessfulUploads(results)

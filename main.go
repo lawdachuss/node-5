@@ -280,12 +280,6 @@ func main() {
 				Value:   "",
 			},
 			&cli.StringFlag{
-				Name:    "pixeldrain-token",
-				Usage:   "API token for PixelDrain uploads",
-				EnvVars: []string{"PIXELDRAIN_TOKEN", "PIXELDRAIN_API_KEY"},
-				Value:   "",
-			},
-			&cli.StringFlag{
 				Name:    "supabase-url",
 				Usage:   "Supabase project URL for remote data persistence (REST API fallback)",
 				EnvVars: []string{"SUPABASE_URL"},

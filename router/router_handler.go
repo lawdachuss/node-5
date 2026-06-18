@@ -159,7 +159,6 @@ type UpdateConfigRequest struct {
 	StreamtapeKey   string `json:"streamtape_key" form:"streamtape_key"`
 	MixdropEmail    string `json:"mixdrop_email" form:"mixdrop_email"`
 	MixdropToken    string `json:"mixdrop_token" form:"mixdrop_token"`
-	PixeldrainToken string `json:"pixeldrain_token" form:"pixeldrain_token"`
 	StripchatPDKey  string `json:"stripchat_pdkey" form:"stripchat_pdkey"`
 }
 
@@ -224,9 +223,9 @@ func UpdateConfig(c *gin.Context) {
                 server.ConfigMu.Unlock()
         }
 
-        // Update uploader credentials (VOE.sx / Streamtape / Mixdrop / PixelDrain)
-        if req.VoeSXAPIKey != "" || req.StreamtapeLogin != "" || req.StreamtapeKey != "" || req.MixdropEmail != "" || req.MixdropToken != "" || req.PixeldrainToken != "" {
-                server.UpdateUploaderCredentials(req.VoeSXAPIKey, req.StreamtapeLogin, req.StreamtapeKey, req.MixdropEmail, req.MixdropToken, req.PixeldrainToken)
+        // Update uploader credentials (VOE.sx / Streamtape / Mixdrop)
+        if req.VoeSXAPIKey != "" || req.StreamtapeLogin != "" || req.StreamtapeKey != "" || req.MixdropEmail != "" || req.MixdropToken != "" {
+                server.UpdateUploaderCredentials(req.VoeSXAPIKey, req.StreamtapeLogin, req.StreamtapeKey, req.MixdropEmail, req.MixdropToken)
         }
 
         if err := server.SaveSettings(); err != nil {
@@ -684,9 +683,6 @@ func embedURLForHostLink(host, link string) string {
                 }
                 return link
         }
-        if strings.Contains(normalizedHost, "pixeldrain") || strings.Contains(normalizedLink, "pixeldrain.com/") {
-                return ""
-        }
 	if strings.Contains(normalizedHost, "gofile") || strings.Contains(normalizedLink, "gofile.io/") {
                 return ""
         }
@@ -717,8 +713,6 @@ func videoURLForHostLink(host, link string) string {
                         return "https://mixdrop.ag/e/" + code
                 }
                 return link
-	case strings.Contains(normalizedHost, "pixeldrain") || strings.Contains(normalizedLink, "pixeldrain.com/"):
-		return ""
 	case strings.Contains(normalizedHost, "gofile") || strings.Contains(normalizedLink, "gofile.io/"):
 		return ""
         default:

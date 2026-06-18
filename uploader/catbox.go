@@ -127,12 +127,19 @@ func (u *CatboxUploader) uploadOnce(filePath string) (string, error) {
 }
 
 // isRetryableCatboxError returns true if the error represents a transient
-// failure that might succeed on retry (network glitch, server overload).
+// failure that might succeed on retry (network glitch, server overload,
+// or IP-based rate limiting).
 func isRetryableCatboxError(err error) bool {
 	errStr := err.Error()
 
 	// Server-side HTTP errors (5xx) — retry
 	if strings.Contains(errStr, "status 5") {
+		return true
+	}
+
+	// "Invalid uploader" (HTTP 412) is often a transient IP block or
+	// rate-limit from Catbox's abuse prevention. Retry with backoff.
+	if strings.Contains(errStr, "Invalid uploader") {
 		return true
 	}
 

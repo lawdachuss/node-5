@@ -44,10 +44,15 @@ func GenerateThumbnailForFile(videoPath string) (thumbURL, spriteURL, previewURL
 	)
 }
 
-// generateThumbnailForFile creates a static thumbnail, a multi-frame sprite
-// sheet, and an animated WebP preview covering the full video duration. All
+// generateThumbnailForFile creates a static thumbnail (JPEG), a multi-frame sprite
+// sheet (JPEG), and an animated WebP preview covering the full video duration. All
 // three are uploaded to remote image hosts and the URLs returned.  Local
 // temp files are always cleaned up.
+//
+// JPEG at quality 85 is used for thumbnail and sprite because:
+//   - All image hosts support it (Pixhost, ImgBB, Catbox)
+//   - mjpeg encoder is fast (minimal encoding lag)
+//   - Small filesize with good visual quality
 //
 // Thumbnail, sprite, and preview run in parallel with independent timeouts:
 //   - thumbnail: 5 min  (single-frame seek)
@@ -117,8 +122,8 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		thumbCtx, thumbCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer thumbCancel()
 
-		thumbWEBP := videoPath + ".thumb.webp"
-		defer os.Remove(thumbWEBP)
+		thumbJPG := videoPath + ".thumb.jpg"
+		defer os.Remove(thumbJPG)
 
 		seekPos := "00:00:03"
 		if dur > 0 && dur < 3 {
@@ -136,9 +141,9 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			"-vframes", "1",
 			"-vf", fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2",
 				thumbWidth, thumbHeight, thumbWidth, thumbHeight),
-			"-c:v", "libwebp",
-			"-quality", "80",
-			thumbWEBP,
+			"-c:v", "mjpeg",
+			"-q:v", "5",
+			thumbJPG,
 		).Run()
 
 		if err != nil {
@@ -148,7 +153,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		}
 
 		imgUploader := uploader.NewMultiImageUploader()
-		if remoteURL, _, uploadErr := imgUploader.Upload(thumbWEBP); uploadErr == nil {
+		if remoteURL, _, uploadErr := imgUploader.Upload(thumbJPG); uploadErr == nil {
 			info("thumb: ✓ %s", baseName)
 			thumbDone <- remoteURL
 		} else {
@@ -170,8 +175,8 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		spriteCtx, spriteCancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer spriteCancel()
 
-		spriteWEBP := videoPath + ".sprite.webp"
-		defer os.Remove(spriteWEBP)
+		spriteJPG := videoPath + ".sprite.jpg"
+		defer os.Remove(spriteJPG)
 
 		// fps=1/INTERVAL extracts one frame per interval.
 		// scale with lanczos gives sharper results than the default bilinear.
@@ -192,9 +197,9 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			"-i", videoPath,
 			"-vf", vf,
 			"-frames:v", "1",
-			"-c:v", "libwebp",
-			"-quality", "80",
-			spriteWEBP,
+			"-c:v", "mjpeg",
+			"-q:v", "5",
+			spriteJPG,
 		).Run()
 
 		if err != nil {
@@ -204,7 +209,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		}
 
 		imgUploader := uploader.NewMultiImageUploader()
-		if remoteURL, _, uploadErr := imgUploader.Upload(spriteWEBP); uploadErr == nil {
+		if remoteURL, _, uploadErr := imgUploader.Upload(spriteJPG); uploadErr == nil {
 			info("sprite: ✓ %s", baseName)
 			spriteDone <- remoteURL
 		} else {
