@@ -133,7 +133,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("PANIC [thumb] generating thumbnail for %s: %v", baseName, r)
-				thumbDone <- ""
+				select { case thumbDone <- "": default: }
 			}
 		}()
 		thumbCtx, thumbCancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -192,7 +192,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("PANIC [sprite] generating sprite for %s: %v", baseName, r)
-				spriteDone <- ""
+				select { case spriteDone <- "": default: }
 			}
 		}()
 		spriteCtx, spriteCancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -263,7 +263,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("PANIC [preview] generating preview for %s: %v", baseName, r)
-				previewDone <- ""
+				select { case previewDone <- "": default: }
 			}
 		}()
 		previewCtx, previewCancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -273,6 +273,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		defer os.Remove(previewMP4)
 
 		config.AcquireFFmpeg()
+		defer config.ReleaseFFmpeg()
 
 		var err error
 		if dur <= previewDuration {
@@ -299,11 +300,12 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			for i := 0; i < previewSegments; i++ {
 				midpoint := step * (float64(i) + 0.5)
 				start := midpoint - segDuration/2
-				if start < 0 {
-					start = 0
-				}
+
 				if start+segDuration > dur {
 					start = dur - segDuration
+				}
+				if start < 0 {
+					start = 0
 				}
 
 				label := fmt.Sprintf("v%d", i)
@@ -331,8 +333,6 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 				previewMP4,
 			).Run()
 		}
-
-		config.ReleaseFFmpeg()
 
 		if err != nil {
 			errFn("preview: failed for %s: %v", baseName, err)

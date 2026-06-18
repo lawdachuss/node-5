@@ -73,18 +73,20 @@ func (u *PixelDrainUploader) uploadOnce(filePath string) (string, error) {
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
 
-	part, err := mw.CreateFormFile("file", filepath.Base(filePath))
-	if err != nil {
-		return "", fmt.Errorf("pixeldrain: create form file: %w", err)
-	}
-
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("pixeldrain: open file: %w", err)
 	}
 	defer file.Close()
 
+	part, err := mw.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		mw.Close()
+		return "", fmt.Errorf("pixeldrain: create form file: %w", err)
+	}
+
 	if _, err := io.Copy(part, file); err != nil {
+		mw.Close()
 		return "", fmt.Errorf("pixeldrain: copy file: %w", err)
 	}
 
@@ -132,15 +134,13 @@ func (u *PixelDrainUploader) uploadOnce(filePath string) (string, error) {
 func isRetryablePixelDrainError(err error) bool {
 	errStr := err.Error()
 
-	if strings.Contains(errStr, "status 5") {
+	// 5xx server errors — retry
+	if strings.HasPrefix(errStr, "pixeldrain: status 5") {
 		return true
 	}
 
-	if strings.Contains(errStr, "send request") {
-		return true
-	}
-
-	if strings.Contains(errStr, "read response") {
+	// Network-level failures — retry
+	if strings.Contains(errStr, "send request") || strings.Contains(errStr, "read response") {
 		return true
 	}
 
