@@ -355,6 +355,8 @@
                style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🔗 Tunnel</a>
             {{ end }}
             <a href="/">← Dashboard</a>
+            <a href="/nodes">Nodes</a>
+            <a href="/pool">Pool</a>
             <a href="/videos">Videos</a>
             <span style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px">
                 <input type="checkbox" id="auto-refresh" onchange="toggleAutoRefresh()"
@@ -371,6 +373,21 @@
             <div class="label">Channels</div>
             <div class="value">{{ len .Channels }}</div>
             <div class="sub">{{ subOnline .Channels }} online</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Nodes</div>
+            <div class="value">{{ len .Nodes }}</div>
+            <div class="sub">{{ .OnlineNodes }} online · {{ .DrainingNodes }} draining</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Node Load</div>
+            <div class="value">{{ .TotalNodeLoad }}</div>
+            <div class="sub">channels assigned</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Mode</div>
+            <div class="value" style="font-size:18px">{{ .PoolMode }}</div>
+            <div class="sub" style="font-size:9px;word-break:break-all">{{ .MyNodeID }}</div>
         </div>
         <div class="metric-card">
             <div class="label">Active Uploads</div>
@@ -464,6 +481,120 @@
                     {{ end }}
                     {{ else }}
                     <tr><td colspan="9" class="empty-state">No channels configured</td></tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ════════ NODES ════════ -->
+    <div class="section">
+        <h2 class="section-title">Nodes <span class="count">{{ len .Nodes }}</span></h2>
+        <div class="table-wrap">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Node</th>
+                        <th>Hostname</th>
+                        <th>Status</th>
+                        <th>Load</th>
+                        <th>Version</th>
+                        <th>Heartbeat</th>
+                        <th>Label</th>
+                        <th>Web UI</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ if .Nodes }}
+                    {{ range .Nodes }}
+                    <tr>
+                        <td><strong class="mono">{{ .NodeID }}</strong></td>
+                        <td>{{ .Hostname }}</td>
+                        <td>
+                            {{ if eq .Status "online" }}
+                                <span class="status-badge active">Online</span>
+                            {{ else if eq .Status "draining" }}
+                                <span class="status-badge pending">Draining</span>
+                            {{ else }}
+                                <span class="status-badge" style="background:rgba(113,113,122,0.12);color:#71717a">Offline</span>
+                            {{ end }}
+                        </td>
+                        <td class="mono">{{ .CurrentLoad }}</td>
+                        <td class="mono">{{ .SoftwareVersion }}</td>
+                        <td class="mono" style="font-size:10px">{{ .LastHeartbeat }}</td>
+                        <td>{{ .InstanceLabel }}</td>
+                        <td>
+                            {{ if .WebURL }}
+                            <a href="{{ .WebURL }}" target="_blank" class="btn-action" title="Open {{ .NodeID }} web UI">Visit</a>
+                            {{ else }}
+                            <span style="color:var(--text-muted);font-size:10px">—</span>
+                            {{ end }}
+                        </td>
+                    </tr>
+                    {{ end }}
+                    {{ else }}
+                    <tr><td colspan="8" class="empty-state">No nodes registered</td></tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ════════ POOL ASSIGNMENTS ════════ -->
+    <div class="section">
+        <h2 class="section-title">
+            Pool Assignments
+            <span class="count">{{ len .Assignments }}</span>
+            <a href="/pool" class="section-toggle" style="text-decoration:none;margin-left:4px">✎ Edit</a>
+        </h2>
+        <div class="table-wrap">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Channel</th>
+                        <th>Site</th>
+                        <th>Node</th>
+                        <th>Status</th>
+                        <th>Live</th>
+                        <th>Quality</th>
+                        <th>Assigned</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ if .Assignments }}
+                    {{ range .Assignments }}
+                    <tr>
+                        <td><strong>{{ .Username }}</strong></td>
+                        <td>{{ .Site }}</td>
+                        <td class="mono">
+                            {{ if .AssignedNode }}
+                            <span title="Node: {{ .AssignedNode }}">{{ .AssignedNode }}</span>
+                            {{ else }}
+                            <span style="color:var(--text-muted)">—</span>
+                            {{ end }}
+                        </td>
+                        <td>
+                            {{ if eq .Status "claimed" }}
+                                <span class="status-badge active">Claimed</span>
+                            {{ else if eq .Status "unassigned" }}
+                                <span class="status-badge pending">Unassigned</span>
+                            {{ else }}
+                                <span class="status-badge">{{ .Status }}</span>
+                            {{ end }}
+                        </td>
+                        <td>
+                            {{ if .IsLive }}
+                                <span class="status-badge active" style="background:rgba(16,185,129,0.12);color:#10b981">Live</span>
+                            {{ else }}
+                                <span class="status-badge" style="background:rgba(113,113,122,0.12);color:#71717a">Offline</span>
+                            {{ end }}
+                        </td>
+                        <td class="mono">{{ .Resolution }}p / {{ .Framerate }}fps</td>
+                        <td class="mono" style="font-size:10px">{{ .AssignedAt }}</td>
+                    </tr>
+                    {{ end }}
+                    {{ else }}
+                    <tr><td colspan="7" class="empty-state">No channels in pool</td></tr>
                     {{ end }}
                 </tbody>
             </table>

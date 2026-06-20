@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+// Channel pool mode constants
+const (
+	PoolModeIsolated = "isolated"
+	PoolModePooled   = "pooled"
+)
+
 // Event represents the type of event for the channel.
 type Event = string
 
@@ -181,4 +187,8 @@ type Config struct {
 
 	SessionDuration       string        // recording session length (e.g. "5h20m0s"); empty = disabled (continuous recording)
 	SessionDurationParsed time.Duration // parsed from SessionDuration; 0 = disabled
+
+	// Distributed shards/nodes configuration
+	NodeID          string // unique node identifier (auto-detected if empty)
+	ChannelPoolMode string // "isolated" (default) or "pooled"
 }

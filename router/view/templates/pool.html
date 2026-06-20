@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/static/styles/app.css?v=5" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'"
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" /></noscript>
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <title>Channel Pool — StreamBate</title>
+    <style>
+        :root {
+            --bg-body: #0a0a0c;
+            --bg-surface: #121216;
+            --bg-card: #1a1a20;
+            --bg-input: rgba(255,255,255,0.04);
+            --text-primary: #e4e4e7;
+            --text-secondary: #a1a1aa;
+            --text-muted: #52525b;
+            --border-color: rgba(255,255,255,0.06);
+            --border-subtle: rgba(255,255,255,0.08);
+            --accent: #d4a053;
+        }
+        html:not(.dark) {
+            --bg-body: #f4f4f5;
+            --bg-surface: #ffffff;
+            --bg-card: #fafafa;
+            --bg-input: #f4f4f5;
+            --text-primary: #18181b;
+            --text-secondary: #52525b;
+            --text-muted: #a1a1aa;
+            --border-color: #e4e4e7;
+            --border-subtle: #d4d4d8;
+        }
+        body {
+            font-family: 'DM Sans', system-ui, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 0;
+            font-size: 13px;
+        }
+        .layout { max-width: 1200px; margin: 0 auto; padding: 24px 32px; }
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 28px; padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .header h1 { font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 22px; margin: 0; }
+        .nav-links { display: flex; gap: 12px; align-items: center; }
+        .nav-links a {
+            font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 8px;
+            background: var(--bg-input); border: 1px solid var(--border-subtle);
+            color: var(--text-secondary); transition: all 0.2s; text-decoration: none;
+        }
+        .nav-links a:hover { background: var(--bg-card); color: var(--text-primary); text-decoration: none; }
+        .section { margin-bottom: 28px; }
+        .section-title {
+            font-family: 'Outfit', sans-serif; font-size: 16px; font-weight: 700;
+            margin: 0 0 10px 0; display: flex; align-items: center; gap: 8px;
+        }
+        .section-title .count {
+            font-size: 11px; font-weight: 600; color: var(--text-muted);
+            background: var(--bg-input); padding: 2px 8px; border-radius: 6px;
+        }
+        .table-wrap { overflow-x: auto; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th {
+            text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.06em; color: var(--text-muted); padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color); white-space: nowrap;
+        }
+        td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(255,255,255,0.02); }
+        .status-badge {
+            display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px;
+            border-radius: 4px; text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        .status-badge.live { background: rgba(16,185,129,0.15); color: #10b981; }
+        .status-badge.claimed { background: rgba(59,130,246,0.15); color: #3b82f6; }
+        .status-badge.unassigned { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        .status-badge.offline { background: rgba(113,113,122,0.12); color: #71717a; }
+        .mono { font-family: ui-monospace, monospace; font-size: 11px; }
+        .empty-state { padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; }
+        .btn-action {
+            font-size: 11px; padding: 3px 8px; border-radius: 4px; border: none;
+            cursor: pointer; font-weight: 600; background: rgba(255,255,255,0.06);
+            color: var(--text-secondary); transition: background 0.15s;
+        }
+        .btn-action:hover { background: rgba(255,255,255,0.12); }
+        .btn-action-del:hover { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .add-form {
+            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+            padding: 12px; background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 12px; margin-bottom: 16px;
+        }
+        .add-form input, .add-form select {
+            padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-color);
+            background: var(--bg-input); color: var(--text-primary); font-size: 12px;
+        }
+        .add-form input:focus, .add-form select:focus { outline: none; border-color: var(--accent); }
+        .add-form button {
+            padding: 6px 14px; border-radius: 6px; border: none;
+            background: var(--accent); color: #fff; font-size: 12px; font-weight: 600;
+            cursor: pointer;
+        }
+        .add-form button:hover { opacity: 0.85; }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <div class="header">
+        <h1>Channel Pool</h1>
+        <div class="nav-links">
+            <a href="/">← Dashboard</a>
+            <a href="/admin">Admin</a>
+            <a href="/nodes">Nodes</a>
+            <a href="/videos">Videos</a>
+            <a href="javascript:void(0)" onclick="location.reload()">Refresh</a>
+        </div>
+    </div>
+
+    <div class="add-form">
+        <select id="pool-site">
+            <option value="chaturbate">Chaturbate</option>
+            <option value="stripchat">Stripchat</option>
+        </select>
+        <input type="text" id="pool-username" placeholder="Username" />
+        <select id="pool-resolution">
+            <option value="2160">4K — 2160p</option>
+            <option value="1440" selected>2K — 1440p</option>
+            <option value="1080">FHD — 1080p</option>
+            <option value="720">HD — 720p</option>
+        </select>
+        <select id="pool-framerate">
+            <option value="60" selected>60 FPS</option>
+            <option value="30">30 FPS</option>
+        </select>
+        <button onclick="addToPool()">Add to Pool</button>
+    </div>
+
+    {{ if .Assignments }}
+    <div class="section">
+        <h2 class="section-title">Assignments <span class="count">{{ len .Assignments }}</span></h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Channel</th>
+                        <th>Site</th>
+                        <th>Node</th>
+                        <th>Status</th>
+                        <th>Live</th>
+                        <th>Resolution</th>
+                        <th>Framerate</th>
+                        <th>Assigned</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ range .Assignments }}
+                    <tr>
+                        <td><strong>{{ .Username }}</strong></td>
+                        <td>{{ .Site }}</td>
+                        <td class="mono">
+                            {{ if .AssignedNode }}
+                            {{ .AssignedNode }}
+                            {{ else }}
+                            <span style="color:var(--text-muted)">—</span>
+                            {{ end }}
+                        </td>
+                        <td>
+                            {{ if eq .Status "claimed" }}
+                                <span class="status-badge claimed">Claimed</span>
+                            {{ else if eq .Status "unassigned" }}
+                                <span class="status-badge unassigned">Unassigned</span>
+                            {{ else }}
+                                <span class="status-badge">{{ .Status }}</span>
+                            {{ end }}
+                        </td>
+                        <td>
+                            {{ if .IsLive }}
+                                <span class="status-badge live">Live</span>
+                            {{ else }}
+                                <span class="status-badge offline">Offline</span>
+                            {{ end }}
+                        </td>
+                        <td class="mono">{{ .Resolution }}p</td>
+                        <td class="mono">{{ .Framerate }}fps</td>
+                        <td class="mono">{{ .AssignedAt }}</td>
+                        <td>
+                            <button class="btn-action btn-action-del" onclick="removeFromPool('{{ .Username }}', '{{ .Site }}')" title="Remove">✕</button>
+                        </td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {{ else }}
+    <div class="empty-state" style="padding:48px">No channels in the pool. Add one above.</div>
+    {{ end }}
+</div>
+
+<script>
+function addToPool() {
+    var site = document.getElementById('pool-site').value;
+    var username = document.getElementById('pool-username').value.trim();
+    if (!username) return;
+    var resolution = parseInt(document.getElementById('pool-resolution').value);
+    var framerate = parseInt(document.getElementById('pool-framerate').value);
+
+    fetch('/api/pool/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({site: site, username: username, resolution: resolution, framerate: framerate})
+    }).then(function(r) {
+        if (r.ok) {
+            location.reload();
+        } else {
+            return r.text().then(function(t) { alert('Failed: ' + t); });
+        }
+    }).catch(function(e) { alert('Error: ' + e); });
+}
+
+function removeFromPool(username, site) {
+    if (!confirm('Remove "' + username + '" from the pool?')) return;
+    fetch('/api/pool/remove', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: username, site: site})
+    }).then(function(r) {
+        if (r.ok) {
+            location.reload();
+        } else {
+            return r.text().then(function(t) { alert('Failed: ' + t); });
+        }
+    }).catch(function(e) { alert('Error: ' + e); });
+}
+</script>
+</body>
+</html>

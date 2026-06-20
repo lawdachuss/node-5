@@ -15,6 +15,8 @@ import (
 
 	"github.com/r3labs/sse/v2"
 	"github.com/teacat/chaturbate-dvr/channel"
+	"github.com/teacat/chaturbate-dvr/coordinator"
+	"github.com/teacat/chaturbate-dvr/database"
 	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/router/view"
 	"github.com/teacat/chaturbate-dvr/server"
@@ -53,6 +55,9 @@ func channelInfoFingerprint(info *entity.ChannelInfo) string {
 type Manager struct {
 	Channels sync.Map
 	SSE      *sse.Server
+
+	// Coordinator for distributed shards/nodes mode (nil in isolated mode).
+	Coordinator *coordinator.Coordinator
 
 	// watcherDone is closed during graceful shutdown so the fsnotify
 	// watcher can release its file handles promptly.
@@ -164,10 +169,8 @@ func (m *Manager) debouncedSave() {
 }
 
 // SaveConfig saves the current channels to Supabase.
+// In pooled mode, saves to the shared channel_pool instead of instance-scoped key.
 func (m *Manager) SaveConfig() error {
-	// Initialize as empty slice (not nil) so MarshalIndent produces "[]"
-	// rather than "null" when all channels are deleted. Supabase's
-	// app_settings.value column has a NOT NULL constraint.
 	config := make([]*entity.ChannelConfig, 0)
 
 	m.Channels.Range(func(key, value any) bool {
@@ -179,10 +182,11 @@ func (m *Manager) SaveConfig() error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	if err := server.SaveChannelsToDB(b); err != nil {
-		return fmt.Errorf("save channels to database: %w", err)
+
+	if server.IsPooledMode() {
+		return server.SavePoolToDB(b)
 	}
-	return nil
+	return server.SaveChannelsToDB(b)
 }
 
 // LoadConfig loads the channels from Supabase and starts them.
@@ -274,6 +278,137 @@ func (m *Manager) LoadConfig() error {
 	return nil
 }
 
+// ============================================================================
+// Pooled mode (distributed shards/nodes)
+// ============================================================================
+
+// LoadPooledConfig loads the shared channel pool and creates channels assigned
+// to this node. Called instead of LoadConfig() when CHANNEL_POOL_MODE=pooled.
+func (m *Manager) LoadPooledConfig() error {
+	// Restore persisted cookies/user-agent
+	if err := server.LoadSettings(); err != nil {
+		fmt.Printf("[WARN] could not load settings: %v\n", err)
+	}
+
+	// Read the shared pool
+	poolData := server.LoadPoolFromDB()
+	if poolData == nil {
+		return nil // empty pool — no channels yet
+	}
+
+	pool, err := coordinator.UnmarshalPool(poolData)
+	if err != nil {
+		return fmt.Errorf("unmarshal pool: %w", err)
+	}
+
+	if len(pool) == 0 {
+		return nil
+	}
+
+	// Query our assigned channels
+	client := server.GetDBClient()
+	if client == nil {
+		return fmt.Errorf("supabase not configured")
+	}
+
+	myAssignments, err := client.GetNodeAssignments(server.NodeID())
+	if err != nil {
+		return fmt.Errorf("get node assignments: %w", err)
+	}
+
+	// Build a set of our assigned usernames
+	ours := make(map[string]bool)
+	for _, a := range myAssignments {
+		ours[a.Username] = true
+	}
+
+	// Create channels for our assignments
+	for _, conf := range pool {
+		if !ours[conf.Username] {
+			continue
+		}
+		if conf.IsPaused.Load() {
+			continue
+		}
+
+		ch := channel.New(conf)
+		m.Channels.Store(conf.Username, ch)
+		ch.PipelineQueue.ResumePending()
+		ch.Resume(0)
+	}
+
+	fmt.Printf("[manager] LoadPooledConfig: loaded %d channel(s) for node %q\n",
+		m.channelCount(), server.NodeID())
+
+	// Cleanup orphans + watcher (same as LoadConfig)
+	go func() {
+		channel.CleanupOrphanedFiles()
+		m.ScanThumbnails()
+	}()
+
+	if server.Config.OrphanCleanupInterval > 0 {
+		go func() {
+			ticker := time.NewTicker(time.Duration(server.Config.OrphanCleanupInterval) * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				channel.CleanupOrphanedFiles()
+				m.ScanThumbnails()
+			}
+		}()
+	}
+
+	// File watcher
+	if server.Config.OutputDir != "" {
+		go func() {
+			dirs := []string{server.Config.OutputDir}
+			fw, err := watcher.New(dirs)
+			if err != nil {
+				log.Printf("[watcher] failed to start: %v", err)
+				return
+			}
+			fw.Start(m.WatcherDone)
+		}()
+	}
+
+	return nil
+}
+
+// CreateChannelFromAssignment implements coordinator.ChannelManager.
+// Creates a channel from a channel_assignments row (claimed by coordinator).
+func (m *Manager) CreateChannelFromAssignment(ca *database.ChannelAssignment) error {
+	conf := coordinator.ConfigFromAssignment(ca)
+	conf.Sanitize()
+
+	// Check for duplicate
+	if _, loaded := m.Channels.LoadOrStore(conf.Username, channel.New(conf)); loaded {
+		return nil // already exists
+	}
+
+	// Load the stored channel and start it
+	thing, _ := m.Channels.Load(conf.Username)
+	ch := thing.(*channel.Channel)
+	ch.PipelineQueue.ResumePending()
+	ch.Resume(0)
+
+	fmt.Printf("[manager] created channel from assignment: %s/%s\n", ca.Site, ca.Username)
+	return nil
+}
+
+// RemoveChannelForReassignment implements coordinator.ChannelManager.
+// Removes a channel from this node when it's been reassigned to another node.
+func (m *Manager) RemoveChannelForReassignment(username string) error {
+	thing, ok := m.Channels.Load(username)
+	if !ok {
+		return nil
+	}
+
+	m.Channels.Delete(username)
+	go func() {
+		thing.(*channel.Channel).Stop()
+	}()
+	return nil
+}
+
 // ScanThumbnails walks the videos directory and generates thumbnails for any
 // video file that is missing preview URLs in Supabase.
 func (m *Manager) ScanThumbnails() {
@@ -312,16 +447,24 @@ func (m *Manager) ScanThumbnails() {
 // CreateChannel starts monitoring an M3U8 stream
 func (m *Manager) CreateChannel(conf *entity.ChannelConfig, shouldSave bool) error {
 	conf.Sanitize()
-	ch := channel.New(conf)
+
+	// In pooled mode, create the assignment and try to claim for this node
+	if server.IsPooledMode() && m.Coordinator != nil {
+		if err := m.Coordinator.CreateChannelAssignment(conf); err != nil {
+			return fmt.Errorf("create assignment: %w", err)
+		}
+		shouldSave = false // pool save is handled by coordinator
+	}
 
 	// prevent duplicate channels
 	_, ok := m.Channels.Load(conf.Username)
 	if ok {
 		return fmt.Errorf("channel %s already exists", conf.Username)
 	}
+
+	ch := channel.New(conf)
 	m.Channels.Store(conf.Username, ch)
 	ch.PipelineQueue.ResumePending()
-
 	ch.Resume(0)
 
 	if shouldSave {
@@ -350,23 +493,27 @@ func (m *Manager) StopChannel(username string) error {
 		return nil
 	}
 
+	ch := thing.(*channel.Channel)
+
 	// Step 1: remove from memory so subsequent requests are immediate no-ops
 	// and the UI reflects the deletion on the next GET /.
 	m.Channels.Delete(username)
 
-	// Step 2: synchronous PATCH to the authoritative app_settings blob.
-	// Must complete before we redirect so the deletion survives a restart.
+	// Step 2: in pooled mode, release the assignment first
+	if server.IsPooledMode() && m.Coordinator != nil {
+		m.Coordinator.ReleaseChannel(username, ch.Config.Site)
+	}
+
+	// Step 3: synchronous PATCH to the authoritative app_settings blob.
+	// In pooled mode, this saves to the shared pool.
 	if err := m.SaveConfig(); err != nil {
 		fmt.Printf("[ERROR] SaveConfig after delete of %q: %v\n", username, err)
 		return fmt.Errorf("save config: %w", err)
 	}
 	fmt.Printf(" INFO [manager] channel %q deleted and persisted to Supabase\n", username)
 
-	// Step 3: non-blocking cleanup — stop the ffmpeg process.
-	// The channels table row is intentionally left orphaned because it is shared
-	// across instances and no longer read by LoadChannelsFromDB.
+	// Step 4: non-blocking cleanup — stop the ffmpeg process.
 	go func() {
-		ch := thing.(*channel.Channel)
 		ch.Stop()
 	}()
 

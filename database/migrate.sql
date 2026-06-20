@@ -28,6 +28,8 @@ DROP VIEW IF EXISTS public.recent_activity CASCADE;
 
 -- Drop tables in reverse dependency order with CASCADE to clean up FKs,
 -- indexes, triggers, and RLS policies.
+DROP TABLE IF EXISTS public.channel_assignments CASCADE;
+DROP TABLE IF EXISTS public.nodes CASCADE;
 DROP TABLE IF EXISTS public.upload_links CASCADE;
 DROP TABLE IF EXISTS public.preview_images CASCADE;
 DROP TABLE IF EXISTS public.channel_logs CASCADE;
@@ -226,6 +228,7 @@ CREATE TABLE IF NOT EXISTS pipeline_states (
     embed_url TEXT DEFAULT '',
     links TEXT DEFAULT '{}',
     retries INTEGER NOT NULL DEFAULT 0,
+    node_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -243,6 +246,57 @@ CREATE TABLE IF NOT EXISTS disk_usage (
 );
 
 CREATE INDEX IF NOT EXISTS idx_disk_usage_recorded_at ON disk_usage(recorded_at DESC);
+
+-- ============================================================================
+-- 11. NODES
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS nodes (
+    node_id          TEXT PRIMARY KEY,
+    hostname         TEXT NOT NULL DEFAULT '',
+    instance_label   TEXT NOT NULL DEFAULT '',
+    software_version TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'offline'
+                     CHECK (status IN ('online','offline','draining')),
+    current_load     INT NOT NULL DEFAULT 0,
+    last_heartbeat   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    web_url          TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status);
+CREATE INDEX IF NOT EXISTS idx_nodes_heartbeat ON nodes(last_heartbeat);
+
+-- ============================================================================
+-- 12. CHANNEL ASSIGNMENTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS channel_assignments (
+    username        TEXT NOT NULL,
+    site            TEXT NOT NULL DEFAULT 'chaturbate'
+                    CHECK (site IN ('chaturbate','stripchat')),
+    assigned_node   TEXT REFERENCES nodes(node_id),
+    status          TEXT NOT NULL DEFAULT 'unassigned'
+                    CHECK (status IN ('unassigned','claimed','recording','paused','error')),
+    is_live         BOOLEAN NOT NULL DEFAULT FALSE,
+    live_checked_at TIMESTAMPTZ,
+    assigned_at     TIMESTAMPTZ,
+    last_heartbeat  TIMESTAMPTZ,
+    framerate       INT NOT NULL DEFAULT 60,
+    resolution      INT NOT NULL DEFAULT 2160,
+    pattern         TEXT NOT NULL DEFAULT '',
+    max_duration    INT NOT NULL DEFAULT 60,
+    max_filesize    INT NOT NULL DEFAULT 0,
+    compress        BOOLEAN NOT NULL DEFAULT FALSE,
+    min_duration_before_upload INT NOT NULL DEFAULT 1200,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (username, site)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ca_assigned_node ON channel_assignments(assigned_node);
+CREATE INDEX IF NOT EXISTS idx_ca_status ON channel_assignments(status);
+CREATE INDEX IF NOT EXISTS idx_ca_islive ON channel_assignments(is_live);
+CREATE INDEX IF NOT EXISTS idx_ca_heartbeat ON channel_assignments(last_heartbeat);
 
 -- ============================================================================
 -- FUNCTIONS AND TRIGGERS
@@ -264,6 +318,12 @@ CREATE TRIGGER update_recordings_updated_at BEFORE UPDATE ON recordings
 CREATE TRIGGER update_app_settings_updated_at BEFORE UPDATE ON app_settings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_nodes_updated_at BEFORE UPDATE ON nodes
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_channel_assignments_updated_at BEFORE UPDATE ON channel_assignments
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- ============================================================================
 -- ROW LEVEL SECURITY
 -- ============================================================================
@@ -277,6 +337,8 @@ ALTER TABLE preview_images ENABLE ROW LEVEL SECURITY;
 ALTER TABLE upload_journal ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pipeline_states ENABLE ROW LEVEL SECURITY;
 ALTER TABLE disk_usage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE channel_assignments ENABLE ROW LEVEL SECURITY;
 
 DO $$
 DECLARE
@@ -288,7 +350,8 @@ BEGIN
         WHERE schemaname = 'public'
           AND tablename IN ('channels', 'recordings', 'upload_links', 'app_settings',
                             'tunnels', 'channel_logs', 'preview_images',
-                            'upload_journal', 'pipeline_states', 'disk_usage')
+                            'upload_journal', 'pipeline_states', 'disk_usage',
+                            'nodes', 'channel_assignments')
     LOOP
         EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', pol.policyname, pol.tablename);
     END LOOP;
@@ -313,6 +376,10 @@ CREATE POLICY "Allow all operations on upload_journal" ON upload_journal
 CREATE POLICY "Allow all operations on pipeline_states" ON pipeline_states
     FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on disk_usage" ON disk_usage
+    FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations on nodes" ON nodes
+    FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations on channel_assignments" ON channel_assignments
     FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================================
@@ -389,6 +456,8 @@ ALTER TABLE public.preview_images OWNER TO anon;
 ALTER TABLE public.upload_journal OWNER TO anon;
 ALTER TABLE public.pipeline_states OWNER TO anon;
 ALTER TABLE public.disk_usage OWNER TO anon;
+ALTER TABLE public.nodes OWNER TO anon;
+ALTER TABLE public.channel_assignments OWNER TO anon;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon;
 

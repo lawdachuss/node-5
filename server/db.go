@@ -15,16 +15,54 @@ import (
 	"github.com/teacat/chaturbate-dvr/entity"
 )
 
-// ─── Instance ID ──────────────────────────────────────────────────────────────
+// ─── Instance ID & Node ID ───────────────────────────────────────────────────
 
 var instanceID string
+var nodeID string
+var channelPoolMode string
 
 func init() {
 	instanceID = os.Getenv("INSTANCE_ID")
 	if instanceID == "" {
 		instanceID = "default"
 	}
+	nodeID = detectNodeID()
+	channelPoolMode = os.Getenv("CHANNEL_POOL_MODE")
+	if channelPoolMode == "" {
+		channelPoolMode = "isolated"
+	}
 }
+
+// detectNodeID auto-detects the node identity using a priority chain:
+// 1. NODE_ID env var (explicit)
+// 2. GITHUB_REPOSITORY env var (set by GitHub Actions)
+// 3. os.Hostname() (VPS / local)
+// 4. Random fallback (defensive)
+func detectNodeID() string {
+	if id := os.Getenv("NODE_ID"); id != "" {
+		return id
+	}
+	if repo := os.Getenv("GITHUB_REPOSITORY"); repo != "" {
+		parts := strings.Split(repo, "-")
+		if len(parts) > 1 {
+			return parts[len(parts)-1]
+		}
+		return strings.ReplaceAll(repo, "/", "-")
+	}
+	if host, err := os.Hostname(); err == nil && host != "" {
+		return host
+	}
+	return fmt.Sprintf("node-%x", time.Now().UnixNano())
+}
+
+// NodeID returns the current node's unique identifier.
+func NodeID() string { return nodeID }
+
+// ChannelPoolMode returns the current channel pool mode ("isolated" or "pooled").
+func ChannelPoolMode() string { return channelPoolMode }
+
+// IsPooledMode returns true if the system is running in distributed pool mode.
+func IsPooledMode() bool { return channelPoolMode == "pooled" }
 
 func channelsKey() string {
 	return "channels_" + instanceID
@@ -305,6 +343,34 @@ func LoadChannelsFromDB() []byte {
 
 	// No channels configured yet for this instance.
 	return nil
+}
+
+// ─── Channel Pool (distributed mode) ────────────────────────────────────────
+
+// PoolKey returns the app_settings key for the shared channel pool.
+func PoolKey() string { return database.PoolKey() }
+
+// LoadPoolFromDB reads the shared channel pool from app_settings.
+func LoadPoolFromDB() []byte {
+	client := GetDBClient()
+	if client == nil {
+		return nil
+	}
+	pool, err := client.LoadPoolFromDB()
+	if err != nil {
+		fmt.Printf("[WARN] load channel pool: %v\n", err)
+		return nil
+	}
+	return pool
+}
+
+// SavePoolToDB writes the shared channel pool to app_settings.
+func SavePoolToDB(data []byte) error {
+	client := GetDBClient()
+	if client == nil {
+		return fmt.Errorf("Supabase not configured")
+	}
+	return client.SavePoolToDB(data)
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/teacat/chaturbate-dvr/channel"
 	"github.com/teacat/chaturbate-dvr/config"
+	"github.com/teacat/chaturbate-dvr/database"
 	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/internal"
 	"github.com/teacat/chaturbate-dvr/server"
@@ -97,6 +98,15 @@ type AdminData struct {
 
 	// Per-channel pipeline counts (keyed by username for easy template lookup)
 	PipelineMap map[string]ChannelPipelinesEntry
+
+	// Distributed shards
+	Nodes           []database.Node
+	Assignments     []database.ChannelAssignment
+	OnlineNodes     int
+	DrainingNodes   int
+	TotalNodeLoad   int
+	PoolMode        string
+	MyNodeID        string
 }
 
 // AdminPage renders the admin panel with deep upload/orphan matrices.
@@ -199,6 +209,32 @@ func AdminPage(c *gin.Context) {
 		}
 	}
 
+	// ── Nodes ──
+	var nodes []database.Node
+	var assignments []database.ChannelAssignment
+	onlineNodes := 0
+	drainingNodes := 0
+	totalNodeLoad := 0
+	if dbClient := server.GetDBClient(); dbClient != nil {
+		var err error
+		nodes, err = dbClient.GetAllNodes()
+		if err != nil {
+			fmt.Printf("[WARN] admin: failed to load nodes: %v\n", err)
+		}
+		assignments, err = dbClient.GetAllAssignments()
+		if err != nil {
+			fmt.Printf("[WARN] admin: failed to load assignments: %v\n", err)
+		}
+	}
+	for _, n := range nodes {
+		if n.Status == "online" {
+			onlineNodes++
+		} else if n.Status == "draining" {
+			drainingNodes++
+		}
+		totalNodeLoad += n.CurrentLoad
+	}
+
 	c.HTML(200, "admin.html", &AdminData{
 		Config:   server.Config,
 		Channels: channels,
@@ -220,6 +256,14 @@ func AdminPage(c *gin.Context) {
 		TunnelURL: tunnelURL,
 
 		PipelineMap: channelPipelineMap,
+
+		Nodes:         nodes,
+		Assignments:   assignments,
+		OnlineNodes:   onlineNodes,
+		DrainingNodes: drainingNodes,
+		TotalNodeLoad: totalNodeLoad,
+		PoolMode:      server.ChannelPoolMode(),
+		MyNodeID:      server.NodeID(),
 	})
 }
 
@@ -1244,4 +1288,202 @@ func DeleteOrphans(c *gin.Context) {
 		resp["errors"] = errors
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// ─── Nodes Dashboard ─────────────────────────────────────────────────────────
+
+// NodesData represents the data structure for the nodes page.
+type NodesData struct {
+	Nodes        []database.Node
+	OnlineCount  int
+	DrainingCount int
+	TotalLoad    int
+	Mode         string
+	MyNodeID     string
+}
+
+// NodesPage renders the nodes dashboard.
+func NodesPage(c *gin.Context) {
+	c.Header("Cache-Control", "public, max-age=15")
+
+	client := server.GetDBClient()
+	var nodes []database.Node
+	if client != nil {
+		var err error
+		nodes, err = client.GetAllNodes()
+		if err != nil {
+			fmt.Printf("[WARN] failed to load nodes: %v\n", err)
+		}
+	}
+
+	onlineCount := 0
+	drainingCount := 0
+	totalLoad := 0
+	for _, n := range nodes {
+		if n.Status == "online" {
+			onlineCount++
+		} else if n.Status == "draining" {
+			drainingCount++
+		}
+		totalLoad += n.CurrentLoad
+	}
+
+	c.HTML(200, "nodes.html", &NodesData{
+		Nodes:         nodes,
+		OnlineCount:   onlineCount,
+		DrainingCount: drainingCount,
+		TotalLoad:     totalLoad,
+		Mode:          server.ChannelPoolMode(),
+		MyNodeID:      server.NodeID(),
+	})
+}
+
+// ─── Pool Editor ──────────────────────────────────────────────────────────────
+
+// PoolData represents the data structure for the pool editor page.
+type PoolData struct {
+	Assignments []database.ChannelAssignment
+}
+
+// PoolPage renders the pool editor page.
+func PoolPage(c *gin.Context) {
+	c.Header("Cache-Control", "public, max-age=15")
+
+	client := server.GetDBClient()
+	var assignments []database.ChannelAssignment
+	if client != nil {
+		var err error
+		assignments, err = client.GetAllAssignments()
+		if err != nil {
+			fmt.Printf("[WARN] failed to load assignments: %v\n", err)
+		}
+	}
+
+	c.HTML(200, "pool.html", &PoolData{
+		Assignments: assignments,
+	})
+}
+
+// ─── Nodes API ────────────────────────────────────────────────────────────────
+
+// GetNodesJSON returns all nodes as JSON.
+func GetNodesJSON(c *gin.Context) {
+	client := server.GetDBClient()
+	if client == nil {
+		c.JSON(http.StatusOK, gin.H{"nodes": []database.Node{}})
+		return
+	}
+
+	nodes, err := client.GetAllNodes()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"nodes": nodes})
+}
+
+// GetPoolJSON returns all assignments as JSON.
+func GetPoolJSON(c *gin.Context) {
+	client := server.GetDBClient()
+	if client == nil {
+		c.JSON(http.StatusOK, gin.H{"assignments": []database.ChannelAssignment{}})
+		return
+	}
+
+	assignments, err := client.GetAllAssignments()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"assignments": assignments})
+}
+
+// PoolAddRequest is the request body for adding a channel to the pool.
+type PoolAddRequest struct {
+	Site       string `json:"site" form:"site"`
+	Username   string `json:"username" form:"username" binding:"required"`
+	Resolution int    `json:"resolution" form:"resolution"`
+	Framerate  int    `json:"framerate" form:"framerate"`
+}
+
+// AddToPool adds a channel to the shared pool.
+func AddToPool(c *gin.Context) {
+	var req PoolAddRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("bind: %v", err)})
+		return
+	}
+
+	if req.Site == "" {
+		req.Site = "chaturbate"
+	}
+	if req.Resolution == 0 {
+		req.Resolution = 1440
+	}
+	if req.Framerate == 0 {
+		req.Framerate = 60
+	}
+
+	client := server.GetDBClient()
+	if client == nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Supabase not configured"})
+		return
+	}
+
+	// Check if already in pool
+	existing, err := client.GetAssignment(req.Username, req.Site)
+	if err == nil && existing != nil {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"error": "channel already in pool"})
+		return
+	}
+
+	assignment := database.ChannelAssignment{
+		Username:   req.Username,
+		Site:       req.Site,
+		Status:     "unassigned",
+		Resolution: req.Resolution,
+		Framerate:  req.Framerate,
+	}
+
+	if err := client.BulkInsertAssignments([]database.ChannelAssignment{assignment}); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// PoolRemoveRequest is the request body for removing a channel from the pool.
+type PoolRemoveRequest struct {
+	Username string `json:"username" binding:"required"`
+	Site     string `json:"site"`
+}
+
+// RemoveFromPool removes a channel from the shared pool.
+func RemoveFromPool(c *gin.Context) {
+	var req PoolRemoveRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("bind: %v", err)})
+		return
+	}
+
+	if req.Site == "" {
+		req.Site = "chaturbate"
+	}
+
+	client := server.GetDBClient()
+	if client == nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Supabase not configured"})
+		return
+	}
+
+	// Delete the assignment row
+	if err := client.DeleteAssignment(req.Username, req.Site); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/static/styles/app.css?v=5" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'"
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800;900&display=swap" /></noscript>
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <title>Nodes — StreamBate</title>
+    <style>
+        :root {
+            --bg-body: #0a0a0c;
+            --bg-surface: #121216;
+            --bg-card: #1a1a20;
+            --bg-input: rgba(255,255,255,0.04);
+            --text-primary: #e4e4e7;
+            --text-secondary: #a1a1aa;
+            --text-muted: #52525b;
+            --border-color: rgba(255,255,255,0.06);
+            --border-subtle: rgba(255,255,255,0.08);
+            --accent: #d4a053;
+        }
+        html:not(.dark) {
+            --bg-body: #f4f4f5;
+            --bg-surface: #ffffff;
+            --bg-card: #fafafa;
+            --bg-input: #f4f4f5;
+            --text-primary: #18181b;
+            --text-secondary: #52525b;
+            --text-muted: #a1a1aa;
+            --border-color: #e4e4e7;
+            --border-subtle: #d4d4d8;
+        }
+        body {
+            font-family: 'DM Sans', system-ui, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 0;
+            font-size: 13px;
+        }
+        .layout { max-width: 1200px; margin: 0 auto; padding: 24px 32px; }
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 28px; padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .header h1 { font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 22px; margin: 0; }
+        .nav-links { display: flex; gap: 12px; align-items: center; }
+        .nav-links a {
+            font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 8px;
+            background: var(--bg-input); border: 1px solid var(--border-subtle);
+            color: var(--text-secondary); transition: all 0.2s; text-decoration: none;
+        }
+        .nav-links a:hover { background: var(--bg-card); color: var(--text-primary); text-decoration: none; }
+        .nav-links a.active { background: rgba(212,160,83,0.12); border-color: rgba(212,160,83,0.25); color: var(--accent); }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 28px; }
+        .metric-card {
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 12px; padding: 16px;
+        }
+        .metric-card .label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
+        .metric-card .value { font-size: 24px; font-weight: 800; font-family: 'Outfit', sans-serif; }
+        .metric-card .sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+        .table-wrap { overflow-x: auto; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th {
+            text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.06em; color: var(--text-muted); padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color); white-space: nowrap;
+        }
+        td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(255,255,255,0.02); }
+        .status-badge {
+            display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px;
+            border-radius: 4px; text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        .status-badge.online { background: rgba(16,185,129,0.15); color: #10b981; }
+        .status-badge.draining { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        .status-badge.offline { background: rgba(113,113,122,0.12); color: #71717a; }
+        .mono { font-family: ui-monospace, monospace; font-size: 11px; }
+        .empty-state { padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <div class="header">
+        <h1>Nodes</h1>
+        <div class="nav-links">
+            <a href="/">← Dashboard</a>
+            <a href="/admin">Admin</a>
+            <a href="/pool" {{ if eq .Mode "pooled" }}class="active"{{ end }}>Pool</a>
+            <a href="/videos">Videos</a>
+            <a href="javascript:void(0)" onclick="location.reload()">Refresh</a>
+        </div>
+    </div>
+
+    <div class="metrics">
+        <div class="metric-card">
+            <div class="label">Total Nodes</div>
+            <div class="value">{{ len .Nodes }}</div>
+            <div class="sub">{{ .OnlineCount }} online</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Online</div>
+            <div class="value" style="color:#10b981">{{ .OnlineCount }}</div>
+            <div class="sub">{{ .DrainingCount }} draining</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Total Load</div>
+            <div class="value">{{ .TotalLoad }}</div>
+            <div class="sub">channels assigned</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Mode</div>
+            <div class="value" style="font-size:18px">{{ .Mode }}</div>
+            <div class="sub">{{ .MyNodeID }}</div>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Node</th>
+                    <th>Hostname</th>
+                    <th>Status</th>
+                    <th>Load</th>
+                    <th>Version</th>
+                    <th>Last Heartbeat</th>
+                    <th>Label</th>
+                    <th>Registered</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ if .Nodes }}
+                {{ range .Nodes }}
+                <tr>
+                    <td><strong class="mono">{{ .NodeID }}</strong></td>
+                    <td>{{ .Hostname }}</td>
+                    <td>
+                        {{ if eq .Status "online" }}
+                            <span class="status-badge online">Online</span>
+                        {{ else if eq .Status "draining" }}
+                            <span class="status-badge draining">Draining</span>
+                        {{ else }}
+                            <span class="status-badge offline">Offline</span>
+                        {{ end }}
+                    </td>
+                    <td class="mono">{{ .CurrentLoad }}</td>
+                    <td class="mono">{{ .SoftwareVersion }}</td>
+                    <td class="mono">{{ .LastHeartbeat }}</td>
+                    <td>{{ .InstanceLabel }}</td>
+                    <td class="mono">{{ .CreatedAt }}</td>
+                </tr>
+                {{ end }}
+                {{ else }}
+                <tr><td colspan="8" class="empty-state">No nodes registered</td></tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

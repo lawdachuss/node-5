@@ -17,11 +17,14 @@ import (
 
 	"github.com/teacat/chaturbate-dvr/channel"
 	"github.com/teacat/chaturbate-dvr/config"
+	"github.com/teacat/chaturbate-dvr/coordinator"
 	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/internal"
 	"github.com/teacat/chaturbate-dvr/manager"
 	"github.com/teacat/chaturbate-dvr/router"
 	"github.com/teacat/chaturbate-dvr/server"
+	"github.com/teacat/chaturbate-dvr/site"
+	"github.com/teacat/chaturbate-dvr/stripchat"
 	"github.com/urfave/cli/v2"
 )
 
@@ -304,6 +307,20 @@ func main() {
 				EnvVars: []string{"STRIPCHAT_PDKEY"},
 				Value:   "",
 			},
+
+			// ── Distributed shards/nodes ────────────────────────────────────
+			&cli.StringFlag{
+				Name:    "channel-pool-mode",
+				Usage:   "Channel distribution mode: 'isolated' (default) or 'pooled'",
+				EnvVars: []string{"CHANNEL_POOL_MODE"},
+				Value:   "isolated",
+			},
+			&cli.StringFlag{
+				Name:    "node-id",
+				Usage:   "Unique node identifier for distributed mode (auto-detected if unset)",
+				EnvVars: []string{"NODE_ID"},
+				Value:   "",
+			},
 		},
 		Action: start,
 	}
@@ -372,6 +389,24 @@ func start(c *cli.Context) error {
 	}
 	fmt.Printf("[startup] manager created in %v\n", time.Since(started).Round(time.Millisecond))
 
+	// ── Distributed coordinator ──────────────────────────────────────────
+	var coord *coordinator.Coordinator
+	var mgr *manager.Manager
+	if m, ok := server.Manager.(*manager.Manager); ok {
+		mgr = m
+	}
+	if server.ChannelPoolMode() == entity.PoolModePooled && mgr != nil {
+		dbClient := server.GetDBClient()
+		if dbClient != nil {
+			coord = coordinator.New(dbClient, mgr)
+			coord.LiveCheck = &liveChecker{}
+			mgr.Coordinator = coord
+			fmt.Printf("[startup] coordinator created for node %q (pooled mode)\n", coord.NodeID)
+		} else {
+			fmt.Println("[WARN] Supabase not configured — pooled mode requires Supabase")
+		}
+	}
+
 	// Graceful shutdown: catch SIGTERM/SIGINT, stop all recording
 	// channels first (so their Cleanup() runs and queues files), then
 	// wait for post-processing + uploads + Supabase
@@ -394,6 +429,11 @@ func start(c *cli.Context) error {
 			fmt.Println("\n[SHUTDOWN] received second interrupt - forcing immediate exit")
 			os.Exit(1)
 		}()
+
+		// In pooled mode: start draining so other nodes stop assigning to us
+		if coord != nil {
+			coord.StartDraining()
+		}
 
 		server.Manager.StopAllChannels()
 		server.Manager.StopWatcher()
@@ -420,6 +460,13 @@ func start(c *cli.Context) error {
 			server.Manager.WaitForAllChannels()
 			fmt.Println("[SHUTDOWN] all recordings finalized - waiting for uploads and Supabase saves...")
 			server.Manager.WaitForUploads()
+
+			// In pooled mode: release channels after all uploads complete
+			if coord != nil {
+				fmt.Println("[SHUTDOWN] releasing channel assignments...")
+				coord.Stop()
+			}
+
 			close(shutdownDone)
 			fmt.Println("[SHUTDOWN] all uploads and Supabase saves complete - exiting cleanly")
 			close(diskMonitorStop)
@@ -448,8 +495,20 @@ func start(c *cli.Context) error {
 		}
 
 		loadT := time.Now()
-		if err := server.Manager.LoadConfig(); err != nil {
-			return fmt.Errorf("load config: %w", err)
+		if server.IsPooledMode() {
+			if mgr == nil {
+				return fmt.Errorf("pooled mode requires manager (unexpected nil)")
+			}
+			if err := mgr.LoadPooledConfig(); err != nil {
+				return fmt.Errorf("load pooled config: %w", err)
+			}
+			if coord != nil {
+				coord.Start(context.Background())
+			}
+		} else {
+			if err := server.Manager.LoadConfig(); err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
 		}
 		fmt.Printf("[startup] LoadConfig completed in %v\n", time.Since(loadT).Round(time.Millisecond))
 
@@ -486,6 +545,26 @@ func start(c *cli.Context) error {
 
 	// block forever
 	select {}
+}
+
+// liveChecker implements coordinator.LivenessChecker using the site adapters.
+type liveChecker struct{}
+
+func (l *liveChecker) IsLive(ctx context.Context, siteName, username string) bool {
+	var siteImpl site.Site
+	switch siteName {
+	case "stripchat":
+		siteImpl = stripchat.NewStripchatSite()
+	default:
+		siteImpl = site.NewChaturbateSite()
+	}
+
+	status, err := siteImpl.GetRoomStatus(ctx, internal.NewReq(), username)
+	if err != nil {
+		return false
+	}
+
+	return status == site.StatusPublic || status == site.StatusPrivate
 }
 
 func startTunnel(port string) {

@@ -245,10 +245,121 @@ The built-in web server (port 8080) provides:
 
 - **Dashboard** — Live channel status, recording progress, disk usage
 - **Live logs** — Real-time SSE stream per channel with filtering
+- **Admin Dashboard** — Channels, nodes, pool assignments, upload queue, orphans, system health
+- **Nodes Dashboard** — All registered nodes with status, load, heartbeat, web UI links
+- **Pool Editor** — Add/remove channels from the shared channel pool
 - **Video browser** — Search, filter, and play recorded videos
 - **Video player** — HLS.js-powered player with quality selection and theater mode
 
 Access locally at `http://localhost:8080` or via Tailscale/Tunnel.
+
+## Distributed Shards (Pooled Mode)
+
+Distribute channel recording across multiple GitHub Actions runner nodes sharing one Supabase database.
+
+### Architecture
+
+```
+Template Repo (MiniDelectableService)
+  │  push to main
+  ▼
+sync-nodes.yml  ──force-push──►  MiniDelectableService-node-a
+                ──force-push──►  MiniDelectableService-node-b
+                ──force-push──►  MiniDelectableService-node-c
+                                    │
+                         each runs secure-rdp.yml
+                         with CHANNEL_POOL_MODE=pooled
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │  Supabase DB     │
+                          │  ┌───────────┐   │
+                          │  │ nodes      │   │
+                          │  │ channel_   │   │
+                          │  │ assignments│   │
+                          │  └───────────┘   │
+                          └─────────────────┘
+```
+
+### How It Works
+
+1. **Template repo** — main development happens here. The `.github/workflows/sync-nodes.yml` workflow automatically force-pushes `main` to each node repo on every push.
+2. **Node repos** — each has its own `secure-rdp.yml` that provisions a Windows RDP runner and runs the DVR with `CHANNEL_POOL_MODE=pooled`.
+3. **Coordinator** — each node runs background loops for heartbeat (30s), channel claiming (60s), liveness checking (120s), and orphan reclamation (120s).
+4. **Fair-share algorithm** — `ceil(total_live_channels / total_alive_nodes)` channels per node. Unassigned channels are claimed atomically via Supabase PATCH.
+
+### Setup
+
+#### 1. Run Database Migration
+
+Run `database/migrate-v2.sql` in your Supabase SQL editor. This creates the `nodes`, `channel_assignments` tables and adds `node_id` to `pipeline_states`.
+
+#### 2. Add Node Repos
+
+Create GitHub repos named after your template repo with a `-node-X` suffix:
+
+```
+MiniDelectableService
+MiniDelectableService-node-a
+MiniDelectableService-node-b
+MiniDelectableService-node-c
+```
+
+#### 3. Set Up Sync
+
+Set a GitHub Personal Access Token with `repo` scope as `SYNC_PAT` secret on the template repo. Push to `main` — the `sync-nodes.yml` workflow force-pushes to all node repos.
+
+#### 4. Configure Node Secrets
+
+For each node repo, set these secrets in GitHub Actions:
+
+| Secret | Value |
+|---|---|
+| `SUPABASE_URL` | Shared Supabase project URL |
+| `SUPABASE_API_KEY` | Shared Supabase anon/service key |
+| `CHANNEL_POOL_MODE` | `pooled` |
+| `NODE_ID` | Unique node ID (e.g., `node-a`) |
+| `INSTANCE_LABEL` | Optional human-readable label |
+| `NODE_WEB_URL` | Optional public URL for this node's web UI |
+
+All other secrets (`COOKIES`, `USER_AGENT`, uploader keys, etc.) can be shared or per-node.
+
+#### 5. Trigger Node Workflows
+
+```bash
+gh workflow run secure-rdp.yml --repo YOUR_ORG/MiniDelectableService-node-a
+gh workflow run secure-rdp.yml --repo YOUR_ORG/MiniDelectableService-node-b
+```
+
+#### 6. Add Channels to Pool
+
+Open the web UI at any node's `/pool` page and add channels. The coordinator on each node will claim unassigned live channels every 60 seconds.
+
+### Web UI Pages
+
+| Route | Description |
+|---|---|
+| `/` | Main dashboard with channel selection |
+| `/admin` | Unified admin: channels, nodes, pool, uploads, orphans, system health |
+| `/nodes` | Standalone nodes dashboard |
+| `/pool` | Pool editor — add/remove channels from shared pool |
+
+### Node Web URL
+
+Set `NODE_WEB_URL` env var on each node to enable cross-node navigation. Each node's tunnel or VPS address is shown as a clickable "Visit" link in the admin nodes table.
+
+### Failure Modes
+
+| Scenario | Recovery |
+|---|---|
+| **Node crash** | 180s heartbeat timeout → reaper releases its channels → other nodes claim them |
+| **Supabase outage** | Heartbeats fail → nodes perceived dead → on recovery, first heartbeat revives node |
+| **Split-brain** | Ownership verification every 60s during recording + file-hash dedup |
+| **Cold start race** | Random jitter on claim interval + atomic SQL PATCH row locking |
+
+### Rollback
+
+Set `CHANNEL_POOL_MODE=isolated` on all nodes and restart. The existing `channel_assignments` rows become inert. All nodes revert to instance-scoped config files.
 
 ## Deployment
 

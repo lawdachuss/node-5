@@ -692,6 +692,7 @@ type PipelineState struct {
 	EmbedURL     string `json:"embed_url,omitempty"`
 	LinksJSON    string `json:"links,omitempty"` // JSON-encoded map[string]string
 	Retries      int    `json:"retries,omitempty"`
+	NodeID       string `json:"node_id,omitempty"`
 	CreatedAt    string `json:"created_at,omitempty"`
 	UpdatedAt    string `json:"updated_at,omitempty"`
 }
@@ -720,6 +721,411 @@ func (c *Client) LoadAllPipelineStates() ([]PipelineState, error) {
 // DeletePipelineState removes a pipeline state by file hash.
 func (c *Client) DeletePipelineState(fileHash string) error {
 	return c.delete(fmt.Sprintf("/pipeline_states?file_hash=eq.%s", url.QueryEscape(fileHash)))
+}
+
+// ============================================================================
+// NODES (distributed shards)
+// ============================================================================
+
+// Node represents a worker node in the distributed recording system.
+type Node struct {
+	NodeID          string `json:"node_id"`
+	Hostname        string `json:"hostname"`
+	InstanceLabel   string `json:"instance_label"`
+	SoftwareVersion string `json:"software_version"`
+	Status          string `json:"status"`
+	CurrentLoad     int    `json:"current_load"`
+	LastHeartbeat   string `json:"last_heartbeat"`
+	WebURL          string `json:"web_url"`
+	CreatedAt       string `json:"created_at,omitempty"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
+}
+
+// UpsertNode registers or updates a node.
+func (c *Client) UpsertNode(node *Node) error {
+	resp, err := c.requestWithRetry("POST", "/nodes?on_conflict=node_id", node)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// HeartbeatNode updates the last_heartbeat timestamp for a node.
+func (c *Client) HeartbeatNode(nodeID string, currentLoad int) error {
+	return c.patch(fmt.Sprintf("/nodes?node_id=eq.%s", url.QueryEscape(nodeID)), map[string]interface{}{
+		"last_heartbeat": "now()",
+		"current_load":   currentLoad,
+	})
+}
+
+// UpdateNodeStatus changes the node's status (online/offline/draining).
+func (c *Client) UpdateNodeStatus(nodeID, status string) error {
+	return c.patch(fmt.Sprintf("/nodes?node_id=eq.%s", url.QueryEscape(nodeID)), map[string]interface{}{
+		"status": status,
+	})
+}
+
+// GetNode retrieves a single node by ID.
+func (c *Client) GetNode(nodeID string) (*Node, error) {
+	var nodes []Node
+	err := c.get(fmt.Sprintf("/nodes?node_id=eq.%s&limit=1", url.QueryEscape(nodeID)), &nodes)
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("node %s not found", nodeID)
+	}
+	return &nodes[0], nil
+}
+
+// GetAllNodes returns all registered nodes, ordered by node_id.
+func (c *Client) GetAllNodes() ([]Node, error) {
+	var nodes []Node
+	err := c.get("/nodes?order=node_id.asc", &nodes)
+	return nodes, err
+}
+
+// GetAliveNodes returns all nodes with status=online and recent heartbeat.
+func (c *Client) GetAliveNodes() ([]Node, error) {
+	cutoff := time.Now().Add(-180 * time.Second).UTC().Format(time.RFC3339)
+	var nodes []Node
+	err := c.get(fmt.Sprintf("/nodes?status=eq.online&last_heartbeat=gt.%s&order=node_id.asc", url.QueryEscape(cutoff)), &nodes)
+	return nodes, err
+}
+
+// GetDeadNodes returns node IDs whose heartbeat is older than the timeout.
+func (c *Client) GetDeadNodes(timeout time.Duration) ([]string, error) {
+	cutoff := time.Now().Add(-timeout).UTC().Format(time.RFC3339)
+	var nodes []Node
+	err := c.get(fmt.Sprintf("/nodes?status=eq.online&last_heartbeat=lt.%s&select=node_id", url.QueryEscape(cutoff)), &nodes)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(nodes))
+	for i, n := range nodes {
+		ids[i] = n.NodeID
+	}
+	return ids, nil
+}
+
+// ============================================================================
+// CHANNEL ASSIGNMENTS
+// ============================================================================
+
+// ChannelAssignment represents the assignment of a channel to a node.
+type ChannelAssignment struct {
+	Username    string `json:"username"`
+	Site        string `json:"site"`
+	AssignedNode string `json:"assigned_node"`
+	Status      string `json:"status"`
+	IsLive      bool   `json:"is_live"`
+	LiveCheckedAt string `json:"live_checked_at,omitempty"`
+	AssignedAt  string `json:"assigned_at,omitempty"`
+	LastHeartbeat string `json:"last_heartbeat,omitempty"`
+	// Config snapshot
+	Framerate                int    `json:"framerate"`
+	Resolution               int    `json:"resolution"`
+	Pattern                  string `json:"pattern"`
+	MaxDuration              int    `json:"max_duration"`
+	MaxFilesize              int    `json:"max_filesize"`
+	Compress                 bool   `json:"compress"`
+	MinDurationBeforeUpload  int    `json:"min_duration_before_upload"`
+	CreatedAt                string `json:"created_at,omitempty"`
+	UpdatedAt                string `json:"updated_at,omitempty"`
+}
+
+// AssignmentStats holds summary statistics for fair-share calculation.
+type AssignmentStats struct {
+	TotalLiveChannels int `json:"total_live_channels"`
+	TotalAliveNodes   int `json:"total_alive_nodes"`
+}
+
+// ClaimChannels atomically claims up to `limit` unassigned live channels for this node.
+// Returns the rows that were successfully claimed (empty slice if none available).
+func (c *Client) ClaimChannels(nodeID string, limit int) ([]ChannelAssignment, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	body := map[string]interface{}{
+		"assigned_node":  nodeID,
+		"status":         "claimed",
+		"assigned_at":    now,
+		"last_heartbeat": now,
+	}
+
+	resp, err := c.requestWithRetry("PATCH",
+		fmt.Sprintf("/channel_assignments?assigned_node=is.null&status=eq.unassigned&is_live=eq.true&order=username.asc&limit=%d", limit),
+		body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var claimed []ChannelAssignment
+	if err := json.NewDecoder(resp.Body).Decode(&claimed); err != nil {
+		return nil, fmt.Errorf("decode claimed: %w", err)
+	}
+	return claimed, nil
+}
+
+// ClaimSpecificChannel atomically claims one specific channel for this node.
+// Returns true if the channel was successfully claimed, false if it was already taken.
+func (c *Client) ClaimSpecificChannel(username, site, nodeID string) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	body := map[string]interface{}{
+		"assigned_node":  nodeID,
+		"status":         "claimed",
+		"assigned_at":    now,
+		"last_heartbeat": now,
+	}
+
+	resp, err := c.requestWithRetry("PATCH",
+		fmt.Sprintf("/channel_assignments?username=eq.%s&site=eq.%s&assigned_node=is.null&status=eq.unassigned",
+			url.QueryEscape(username), url.QueryEscape(site)),
+		body)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var claimed []ChannelAssignment
+	if err := json.NewDecoder(resp.Body).Decode(&claimed); err != nil {
+		return false, fmt.Errorf("decode claimed: %w", err)
+	}
+	return len(claimed) > 0, nil
+}
+
+// ReleaseNodeChannels releases all channels currently assigned to a node.
+func (c *Client) ReleaseNodeChannels(nodeID string) error {
+	return c.patch(fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&status=neq.unassigned", url.QueryEscape(nodeID)),
+		map[string]interface{}{
+			"assigned_node": nil,
+			"status":        "unassigned",
+		})
+}
+
+// ReleaseChannel releases a single channel back to the pool.
+func (c *Client) ReleaseChannel(username, site string) error {
+	return c.patch(fmt.Sprintf("/channel_assignments?username=eq.%s&site=eq.%s", url.QueryEscape(username), url.QueryEscape(site)),
+		map[string]interface{}{
+			"assigned_node": nil,
+			"status":        "unassigned",
+		})
+}
+
+// DeleteAssignment removes a channel assignment entirely from the pool.
+func (c *Client) DeleteAssignment(username, site string) error {
+	return c.delete(fmt.Sprintf("/channel_assignments?username=eq.%s&site=eq.%s", url.QueryEscape(username), url.QueryEscape(site)))
+}
+
+// GetNodeAssignments returns all channel assignments for a given node.
+func (c *Client) GetNodeAssignments(nodeID string) ([]ChannelAssignment, error) {
+	var assignments []ChannelAssignment
+	err := c.get(fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&order=username.asc", url.QueryEscape(nodeID)), &assignments)
+	return assignments, err
+}
+
+// GetAssignment returns the assignment for a specific channel.
+func (c *Client) GetAssignment(username, site string) (*ChannelAssignment, error) {
+	var assignments []ChannelAssignment
+	err := c.get(fmt.Sprintf("/channel_assignments?username=eq.%s&site=eq.%s&limit=1",
+		url.QueryEscape(username), url.QueryEscape(site)), &assignments)
+	if err != nil {
+		return nil, err
+	}
+	if len(assignments) == 0 {
+		return nil, nil
+	}
+	return &assignments[0], nil
+}
+
+// GetAssignmentsByStatus returns all assignments with a given status.
+func (c *Client) GetAssignmentsByStatus(status string) ([]ChannelAssignment, error) {
+	var assignments []ChannelAssignment
+	err := c.get(fmt.Sprintf("/channel_assignments?status=eq.%s&order=username.asc", url.QueryEscape(status)), &assignments)
+	return assignments, err
+}
+
+// GetAllAssignments returns all channel assignments.
+func (c *Client) GetAllAssignments() ([]ChannelAssignment, error) {
+	var assignments []ChannelAssignment
+	err := c.get("/channel_assignments?order=username.asc&limit=50000", &assignments)
+	return assignments, err
+}
+
+// GetAssignmentStats returns total live channels and total alive nodes for fair-share calculation.
+func (c *Client) GetAssignmentStats() (*AssignmentStats, error) {
+	stats := &AssignmentStats{}
+
+	// Count live channels
+	var liveChannels []ChannelAssignment
+	err := c.get("/channel_assignments?is_live=eq.true&select=username&limit=50000", &liveChannels)
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalLiveChannels = len(liveChannels)
+
+	// Count alive nodes
+	aliveNodes, err := c.GetAliveNodes()
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalAliveNodes = len(aliveNodes)
+
+	return stats, nil
+}
+
+// CountMyAssignments returns the number of channels assigned to a node.
+// Uses a count query rather than loading all rows.
+func (c *Client) CountMyAssignments(nodeID string) (int, error) {
+	var assignments []ChannelAssignment
+	err := c.get(fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&status=neq.unassigned&select=username&limit=50000",
+		url.QueryEscape(nodeID)), &assignments)
+	if err != nil {
+		return 0, err
+	}
+	return len(assignments), nil
+}
+
+// SetChannelsLive bulk-updates is_live=true for the given usernames.
+func (c *Client) SetChannelsLive(usernames []string) error {
+	if len(usernames) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	return c.patch(
+		fmt.Sprintf("/channel_assignments?username=in.(%s)&is_live=eq.false",
+			joinEscaped(usernames)),
+		map[string]interface{}{
+			"is_live":         true,
+			"live_checked_at": now,
+		})
+}
+
+// SetChannelsNotLive bulk-updates is_live=false for channels NOT in the given list.
+func (c *Client) SetChannelsNotLive(usernames []string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if len(usernames) == 0 {
+		// Mark all as not live
+		return c.patch("/channel_assignments?is_live=eq.true",
+			map[string]interface{}{
+				"is_live":         false,
+				"live_checked_at": now,
+			})
+	}
+	return c.patch(
+		fmt.Sprintf("/channel_assignments?username=not.in.(%s)&is_live=eq.true",
+			joinEscaped(usernames)),
+		map[string]interface{}{
+			"is_live":         false,
+			"live_checked_at": now,
+		})
+}
+
+// ReclaimChannels sets assigned_node=NULL for all channels belonging to a dead node.
+// Returns the number of channels reclaimed.
+func (c *Client) ReclaimChannels(deadNodeID string) (int, error) {
+	// First, count what we'll reclaim
+	var assignments []ChannelAssignment
+	err := c.get(fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&select=username&limit=50000",
+		url.QueryEscape(deadNodeID)), &assignments)
+	if err != nil {
+		return 0, err
+	}
+	if len(assignments) == 0 {
+		return 0, nil
+	}
+
+	// Release them
+	if err := c.ReleaseNodeChannels(deadNodeID); err != nil {
+		return 0, err
+	}
+	return len(assignments), nil
+}
+
+// BulkInsertAssignments creates channel_assignments rows for channels that don't have one yet.
+func (c *Client) BulkInsertAssignments(assignments []ChannelAssignment) error {
+	if len(assignments) == 0 {
+		return nil
+	}
+	resp, err := c.requestWithRetry("POST", "/channel_assignments?on_conflict=username,site", assignments)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// ============================================================================
+// CHANNEL POOL (shared app_settings key)
+// ============================================================================
+
+// PoolKey returns the app_settings key for the shared channel pool.
+func PoolKey() string {
+	return "channel_pool"
+}
+
+// LoadPoolFromDB reads the shared channel pool from app_settings.
+func (c *Client) LoadPoolFromDB() ([]byte, error) {
+	var settings []AppSetting
+	err := c.get(fmt.Sprintf("/app_settings?key=eq.%s&limit=1", PoolKey()), &settings)
+	if err != nil {
+		return nil, err
+	}
+	if len(settings) == 0 {
+		return nil, nil
+	}
+	return settings[0].Value, nil
+}
+
+// SavePoolToDB writes the shared channel pool to app_settings.
+func (c *Client) SavePoolToDB(data []byte) error {
+	return c.SaveSetting(PoolKey(), json.RawMessage(data))
+}
+
+// GetAllSettingKeys returns all app_settings keys matching a LIKE pattern.
+// The prefix should be like "channels_" to get all instance-scoped keys.
+func (c *Client) GetAllSettingKeys(likePattern string) ([]string, error) {
+	// Supabase REST doesn't support LIKE directly, so we fetch all keys
+	// and filter client-side. For typical deployments this is < 100 keys.
+	var settings []AppSetting
+	err := c.get("/app_settings?select=key&limit=50000", &settings)
+	if err != nil {
+		return nil, err
+	}
+	var matches []string
+	for _, s := range settings {
+		if strings.HasPrefix(s.Key, likePattern) {
+			matches = append(matches, s.Key)
+		}
+	}
+	return matches, nil
+}
+
+// joinEscaped joins strings with Supabase-compatible CSV escaping.
+func joinEscaped(items []string) string {
+	escaped := make([]string, len(items))
+	for i, item := range items {
+		escaped[i] = url.QueryEscape(item)
+	}
+	return strings.Join(escaped, ",")
 }
 
 // ============================================================================
