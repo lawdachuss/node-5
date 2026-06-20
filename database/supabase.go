@@ -735,7 +735,7 @@ type Node struct {
 	SoftwareVersion string `json:"software_version"`
 	Status          string `json:"status"`
 	CurrentLoad     int    `json:"current_load"`
-	LastHeartbeat   string `json:"last_heartbeat"`
+	LastHeartbeat   string `json:"last_heartbeat,omitempty"`
 	WebURL          string `json:"web_url"`
 	CreatedAt       string `json:"created_at,omitempty"`
 	UpdatedAt       string `json:"updated_at,omitempty"`
