@@ -100,10 +100,12 @@ func TestIntegrationClaimChannels(t *testing.T) {
 	coord.Mode = entity.PoolModePooled
 	coord.Register()
 
-	// Create test assignments for this node and make them live unassigned
+	// Create test assignments for this node.  Claiming does NOT filter on
+	// is_live: a DVR claims channels from the pool and records them when they
+	// actually go live, so offline channels must be claimable too.
 	assignments := []database.ChannelAssignment{
 		{Username: testNodeID + "-ch1", Site: "chaturbate", Status: "unassigned", IsLive: true, Framerate: 60, Resolution: 1080},
-		{Username: testNodeID + "-ch2", Site: "stripchat", Status: "unassigned", IsLive: true, Framerate: 30, Resolution: 720},
+		{Username: testNodeID + "-ch2", Site: "stripchat", Status: "unassigned", IsLive: false, Framerate: 30, Resolution: 720},
 		{Username: testNodeID + "-ch3", Site: "chaturbate", Status: "unassigned", IsLive: false, Framerate: 60, Resolution: 2160},
 	}
 	if err := client.BulkInsertAssignments(assignments); err != nil {
@@ -115,13 +117,14 @@ func TestIntegrationClaimChannels(t *testing.T) {
 		}
 	}()
 
-	// Claim up to 2 live channels
+	// Claim up to 2 channels (regardless of is_live).  Claims are ordered by
+	// username asc, so ch1 and ch2 should be claimed; ch3 stays unassigned.
 	claimed, err := client.ClaimChannels(testNodeID, 2)
 	if err != nil {
 		t.Fatalf("ClaimChannels error: %v", err)
 	}
 	if len(claimed) != 2 {
-		t.Errorf("ClaimChannels returned %d, want 2 (should claim the 2 live channels)", len(claimed))
+		t.Fatalf("ClaimChannels returned %d, want 2", len(claimed))
 	}
 
 	// Verify claimed channels are assigned to our node
@@ -134,13 +137,14 @@ func TestIntegrationClaimChannels(t *testing.T) {
 		}
 	}
 
-	// Verify the offline channel was NOT claimed
-	offline, err := client.GetAssignment(testNodeID+"-ch3", "chaturbate")
+	// ch3 is the 3rd in order, so it was NOT claimed (limit was 2) — not because
+	// of any is_live filter.
+	remaining, err := client.GetAssignment(testNodeID+"-ch3", "chaturbate")
 	if err != nil {
 		t.Fatalf("GetAssignment error: %v", err)
 	}
-	if offline != nil && offline.AssignedNode != "" {
-		t.Error("offline channel should not have been claimed")
+	if remaining != nil && remaining.AssignedNode != "" {
+		t.Error("ch3 should not have been claimed (beyond limit)")
 	}
 }
 
@@ -271,9 +275,9 @@ func TestIntegrationReaperEligibility(t *testing.T) {
 
 	// Register node
 	_ = client.UpsertNode(&database.Node{
-		NodeID: testNodeID,
+		NodeID:   testNodeID,
 		Hostname: "test-host",
-		Status: "online",
+		Status:   "online",
 		// Set heartbeat to far in the past
 		LastHeartbeat: time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339),
 	})

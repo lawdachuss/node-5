@@ -87,14 +87,12 @@ func (c *Coordinator) runClaimCycle() {
 	if strings.HasPrefix(c.NodeID, "node-") && totalNodes < 2 {
 		totalNodes = 2
 	}
-	// Use live-channel count for fair-share so nodes only compete for
-	// channels that are actually online.  Falls back to total pool when
-	// live-check hasn't run yet (TotalLiveChannels == 0 but pool is non-empty).
-	livePool := stats.TotalLiveChannels
-	if livePool == 0 && totalPool > 0 {
-		livePool = totalPool
-	}
-	fairShare := int(math.Ceil(float64(livePool) / float64(totalNodes)))
+	// Fair-share is based on the total pool, not live-channel count.  A DVR is
+	// expected to claim channels that are offline at claim time and record them
+	// when they go live, so all pool channels count toward distribution.  Using
+	// live-channel count would zero out fair-share whenever the liveness loop
+	// (every ~120s) hasn't run, starving all claims.
+	fairShare := int(math.Ceil(float64(totalPool) / float64(totalNodes)))
 
 	myLoad, err := c.Client.CountMyAssignments(c.NodeID)
 	if err != nil {
@@ -111,8 +109,8 @@ func (c *Coordinator) runClaimCycle() {
 			return
 		}
 		if len(released) > 0 {
-			log.Printf("[coordinator] released %d excess channel(s) (load: %d -> %d, fairShare: %d, livePool: %d, totalPool: %d)",
-				len(released), myLoad, myLoad-len(released), fairShare, livePool, totalPool)
+			log.Printf("[coordinator] released %d excess channel(s) (load: %d -> %d, fairShare: %d, totalPool: %d)",
+				len(released), myLoad, myLoad-len(released), fairShare, totalPool)
 			for _, ca := range released {
 				if c.Manager != nil {
 					c.Manager.RemoveChannelForReassignment(ca.Username)
@@ -131,8 +129,8 @@ func (c *Coordinator) runClaimCycle() {
 			return
 		}
 		if len(claimed) > 0 {
-			log.Printf("[coordinator] claimed %d new channel(s) (load: %d -> %d, fairShare: %d, livePool: %d, totalPool: %d)",
-				len(claimed), myLoad, myLoad+len(claimed), fairShare, livePool, totalPool)
+			log.Printf("[coordinator] claimed %d new channel(s) (load: %d -> %d, fairShare: %d, totalPool: %d)",
+				len(claimed), myLoad, myLoad+len(claimed), fairShare, totalPool)
 			for _, ca := range claimed {
 				if c.Manager != nil {
 					if err := c.Manager.CreateChannelFromAssignment(&ca); err != nil {

@@ -867,8 +867,15 @@ func (c *Client) ClaimChannels(nodeID string, limit int) ([]ChannelAssignment, e
 		"last_heartbeat": now,
 	}
 
+	// Claim any unassigned channel regardless of current is_live status.  The
+	// claimed channel is watched by the manager and recorded when it actually
+	// goes live; filtering to is_live=true here would starve claims whenever the
+	// liveness check hasn't run yet (it updates is_live only every ~120s), and
+	// would prevent a node from ever picking up a channel that's offline at claim
+	// time but starts broadcasting later.  Fair-share still prefers releasing
+	// offline channels first (see ReleaseExcessChannels).
 	resp, err := c.requestWithRetry("PATCH",
-		fmt.Sprintf("/channel_assignments?assigned_node=is.null&status=eq.unassigned&is_live=eq.true&order=username.asc&limit=%d", limit),
+		fmt.Sprintf("/channel_assignments?assigned_node=is.null&status=eq.unassigned&order=username.asc&limit=%d", limit),
 		body)
 	if err != nil {
 		return nil, err
