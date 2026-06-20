@@ -133,20 +133,43 @@
             margin-top: 2px;
         }
 
-        /* ── Sections ── */
-        .section {
-            margin-bottom: 28px;
+        /* ── Collapsible Sections ── */
+        details.section {
+            margin-bottom: 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
         }
-        .section-title {
+        details.section summary {
             font-family: 'Outfit', sans-serif;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 700;
-            margin: 0 0 10px 0;
+            padding: 14px 18px;
+            cursor: pointer;
             display: flex;
             align-items: center;
             gap: 8px;
+            user-select: none;
+            list-style: none;
+            transition: background 0.15s;
         }
-        .section-title .count {
+        details.section summary::-webkit-details-marker {
+            display: none;
+        }
+        details.section summary:hover {
+            background: var(--bg-input);
+        }
+        details.section summary .arrow {
+            font-size: 10px;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+            display: inline-block;
+        }
+        details.section[open] summary .arrow {
+            transform: rotate(90deg);
+        }
+        details.section summary .count {
             font-size: 11px;
             font-weight: 600;
             color: var(--text-muted);
@@ -154,18 +177,32 @@
             padding: 2px 8px;
             border-radius: 6px;
         }
+        details.section summary .badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        details.section summary .badge.online { background: rgba(16,185,129,0.15); color: #10b981; }
+        details.section summary .badge.offline { background: rgba(113,113,122,0.12); color: #71717a; }
+        details.section summary .badge.draining { background: rgba(245,158,11,0.15); color: #f59e0b; }
+        details.section summary .badge.uploading { background: rgba(59,130,246,0.15); color: #3b82f6; }
+        details.section .section-body {
+            padding: 0 18px 18px;
+            border-top: 1px solid var(--border-color);
+        }
 
         /* ── Tables ── */
         .table-wrap {
             overflow-x: auto;
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
         }
         table.admin-table {
             width: 100%;
             border-collapse: collapse;
             font-size: 12px;
+            margin-top: 10px;
         }
         table.admin-table th {
             text-align: left;
@@ -236,23 +273,6 @@
         .mono { font-family: ui-monospace, monospace; font-size: 11px; }
         .truncate { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        .orphan-actions {
-            display: flex;
-            gap: 6px;
-        }
-        .orphan-actions button {
-            font-size: 10px;
-            padding: 3px 10px;
-            border-radius: 5px;
-            border: none;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .btn-retry { background: var(--accent); color: #fff; }
-        .btn-retry:hover { opacity: 0.85; }
-        .btn-delete { background: rgba(239,68,68,0.15); color: #ef4444; }
-        .btn-delete:hover { background: rgba(239,68,68,0.25); }
-
         .empty-state {
             padding: 24px;
             text-align: center;
@@ -278,6 +298,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
             gap: 8px;
+            margin-top: 10px;
         }
         .detail-item {
             font-size: 11px;
@@ -299,18 +320,6 @@
             word-break: break-all;
         }
 
-        .section-toggle {
-            background: none;
-            border: none;
-            color: var(--text-secondary);
-            cursor: pointer;
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 4px;
-            margin-left: 8px;
-        }
-        .section-toggle:hover { background: var(--bg-input); color: var(--text-primary); }
-
         .filter-input {
             width: 100%;
             padding: 8px 12px;
@@ -321,7 +330,7 @@
             font-size: 12px;
             outline: none;
             box-sizing: border-box;
-            margin-bottom: 8px;
+            margin-top: 10px;
         }
         .filter-input:focus { border-color: var(--accent); }
 
@@ -335,6 +344,56 @@
         .disk-bar .fill {
             height: 100%;
             border-radius: 3px;
+        }
+
+        .upload-progress-inline {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .upload-progress-inline .mini-bar {
+            flex: 1;
+            max-width: 80px;
+            height: 3px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.06);
+            overflow: hidden;
+        }
+        .upload-progress-inline .mini-bar .fill {
+            height: 100%;
+            border-radius: 2px;
+            background: var(--accent);
+        }
+
+        .orphan-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .orphan-actions button {
+            font-size: 10px;
+            padding: 3px 10px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .btn-retry { background: var(--accent); color: #fff; }
+        .btn-retry:hover { opacity: 0.85; }
+        .btn-delete { background: rgba(239,68,68,0.15); color: #ef4444; }
+        .btn-delete:hover { background: rgba(239,68,68,0.25); }
+
+        .edit-link {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 10px;
+            border-radius: 4px;
+            background: var(--bg-input);
+            color: var(--text-secondary);
+            margin-left: 4px;
+        }
+        .edit-link:hover {
+            background: rgba(255,255,255,0.1);
+            text-decoration: none;
         }
 
         @media (max-width: 768px) {
@@ -355,8 +414,6 @@
                style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🔗 Tunnel</a>
             {{ end }}
             <a href="/">← Dashboard</a>
-            <a href="/nodes">Nodes</a>
-            <a href="/pool">Pool</a>
             <a href="/videos">Videos</a>
             <span style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px">
                 <input type="checkbox" id="auto-refresh" onchange="toggleAutoRefresh()"
@@ -428,10 +485,10 @@
         </div>
     </div>
 
-    <!-- ════════ CHANNELS TABLE ════════ -->
-    <div class="section">
-        <h2 class="section-title">Channels <span class="count">{{ len .Channels }}</span></h2>
-        <div class="table-wrap">
+    <!-- ════════ CHANNELS ════════ -->
+    <details class="section" open>
+        <summary><span class="arrow">▶</span> Channels <span class="count">{{ len .Channels }}</span></summary>
+        <div class="section-body">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -440,7 +497,7 @@
                         <th>Status</th>
                         <th>Duration</th>
                         <th>Filesize</th>
-                        <th>Filename</th>
+                        <th>Upload</th>
                         <th>Queued</th>
                         <th>Failed</th>
                         <th>Actions</th>
@@ -466,7 +523,20 @@
                         </td>
                         <td class="mono">{{ $ch.Duration }}</td>
                         <td class="mono">{{ $ch.Filesize }}</td>
-                        <td class="mono truncate" title="{{ $ch.Filename }}">{{ $ch.Filename }}</td>
+                        <td style="min-width:140px">
+                            {{ if $ch.UploadStatus }}
+                            <div class="upload-progress-inline">
+                                <span class="status-badge" style="background:rgba(59,130,246,0.15);color:#3b82f6;font-size:9px">{{ $ch.UploadStatus }}</span>
+                                <div class="mini-bar"><div class="fill" style="width:{{ printf "%.0f" $ch.UploadProgress }}%"></div></div>
+                                <span style="font-size:10px;color:var(--text-muted)">{{ printf "%.0f" $ch.UploadProgress }}%</span>
+                            </div>
+                            {{ if $ch.UploadFilename }}
+                            <div style="font-size:9px;color:var(--text-muted);margin-top:2px" class="mono truncate" title="{{ $ch.UploadFilename }}">{{ $ch.UploadFilename }}</div>
+                            {{ end }}
+                            {{ else }}
+                            <span style="color:var(--text-muted);font-size:10px">—</span>
+                            {{ end }}
+                        </td>
                         <td class="mono">{{ $pc.Queued }}</td>
                         <td class="mono">{{ $pc.Failed }}</td>
                         <td>
@@ -485,12 +555,78 @@
                 </tbody>
             </table>
         </div>
-    </div>
+    </details>
+
+    <!-- ════════ ACTIVE UPLOADS ════════ -->
+    <details class="section" open>
+        <summary>
+            <span class="arrow">▶</span>
+            Active Uploads <span class="count">{{ len .Uploads.Active }}</span>
+            {{ if gt (len .Uploads.Active) 0 }}
+            <span class="badge uploading">{{ len .Uploads.Active }} uploading</span>
+            {{ end }}
+        </summary>
+        <div class="section-body">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Channel</th>
+                        <th>File</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                        <th>Hosts</th>
+                        <th>Bytes</th>
+                        <th>Speed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ if .Uploads.Active }}
+                    {{ range .Uploads.Active }}
+                    <tr>
+                        <td><strong>{{ .Channel }}</strong></td>
+                        <td class="mono truncate" title="{{ .Filename }}">{{ .Filename }}</td>
+                        <td><span class="status-badge active">{{ .Status }}</span></td>
+                        <td style="min-width:140px">
+                            {{ printf "%.0f" .Progress }}%
+                            <div class="progress-bar"><div class="fill ok" style="width:{{ .Progress }}%"></div></div>
+                        </td>
+                        <td>
+                            <div class="host-list">
+                                <span class="host-tag">{{ .HostCount }}/{{ .HostTotal }} done</span>
+                                {{ range .Hosts }}
+                                <span class="host-tag {{ if eq .Status "done" }}ok{{ else if eq .Status "failed" }}fail{{ end }}"
+                                      title="{{ .Host }}: {{ printf "%.0f" .Progress }}%{{ if .Speed }} @ {{ .Speed }}{{ end }}">
+                                    {{ .Host }}
+                                </span>
+                                {{ end }}
+                            </div>
+                        </td>
+                        <td class="mono">{{ if gt .BytesTotal 0 }}{{ .BytesCurrent }}/{{ .BytesTotal }}{{ else }}—{{ end }}</td>
+                        <td class="mono">{{ if .Speed }}{{ .Speed }}{{ else }}—{{ end }}</td>
+                    </tr>
+                    {{ end }}
+                    {{ else }}
+                    <tr><td colspan="7" class="empty-state">No active uploads</td></tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+    </details>
 
     <!-- ════════ NODES ════════ -->
-    <div class="section">
-        <h2 class="section-title">Nodes <span class="count">{{ len .Nodes }}</span></h2>
-        <div class="table-wrap">
+    <details class="section" open>
+        <summary>
+            <span class="arrow">▶</span>
+            Nodes <span class="count">{{ len .Nodes }}</span>
+            {{ if gt .OnlineNodes 0 }}
+            <span class="badge online">{{ .OnlineNodes }} online</span>
+            {{ end }}
+            {{ if gt .DrainingNodes 0 }}
+            <span class="badge draining">{{ .DrainingNodes }} draining</span>
+            {{ end }}
+            <a href="/nodes" class="edit-link">View All</a>
+        </summary>
+        <div class="section-body">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -499,8 +635,8 @@
                         <th>Status</th>
                         <th>Load</th>
                         <th>Version</th>
-                        <th>Heartbeat</th>
                         <th>Label</th>
+                        <th>Heartbeat</th>
                         <th>Web UI</th>
                     </tr>
                 </thead>
@@ -521,8 +657,8 @@
                         </td>
                         <td class="mono">{{ .CurrentLoad }}</td>
                         <td class="mono">{{ .SoftwareVersion }}</td>
-                        <td class="mono" style="font-size:10px">{{ .LastHeartbeat }}</td>
                         <td>{{ .InstanceLabel }}</td>
+                        <td class="mono" style="font-size:10px">{{ .LastHeartbeat }}</td>
                         <td>
                             {{ if .WebURL }}
                             <a href="{{ .WebURL }}" target="_blank" class="btn-action" title="Open {{ .NodeID }} web UI">Visit</a>
@@ -538,16 +674,16 @@
                 </tbody>
             </table>
         </div>
-    </div>
+    </details>
 
     <!-- ════════ POOL ASSIGNMENTS ════════ -->
-    <div class="section">
-        <h2 class="section-title">
-            Pool Assignments
-            <span class="count">{{ len .Assignments }}</span>
-            <a href="/pool" class="section-toggle" style="text-decoration:none;margin-left:4px">✎ Edit</a>
-        </h2>
-        <div class="table-wrap">
+    <details class="section">
+        <summary>
+            <span class="arrow">▶</span>
+            Pool <span class="count">{{ len .Assignments }}</span>
+            <a href="/pool" class="edit-link">✎ Edit</a>
+        </summary>
+        <div class="section-body">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -599,62 +735,12 @@
                 </tbody>
             </table>
         </div>
-    </div>
-
-    <!-- ════════ ACTIVE UPLOADS ════════ -->
-    <div class="section">
-        <h2 class="section-title">Active Uploads <span class="count">{{ len .Uploads.Active }}</span></h2>
-        <div class="table-wrap">
-            <table class="admin-table">
-                <thead>
-                    <tr>
-                        <th>Channel</th>
-                        <th>File</th>
-                        <th>Status</th>
-                        <th>Progress</th>
-                        <th>Hosts</th>
-                        <th>Bytes</th>
-                        <th>Speed</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {{ if .Uploads.Active }}
-                    {{ range .Uploads.Active }}
-                    <tr>
-                        <td><strong>{{ .Channel }}</strong></td>
-                        <td class="mono truncate" title="{{ .Filename }}">{{ .Filename }}</td>
-                        <td><span class="status-badge active">{{ .Status }}</span></td>
-                        <td style="min-width:140px">
-                            {{ printf "%.0f" .Progress }}%
-                            <div class="progress-bar"><div class="fill ok" style="width:{{ .Progress }}%"></div></div>
-                        </td>
-                        <td>
-                            <div class="host-list">
-                                <span class="host-tag">{{ .HostCount }}/{{ .HostTotal }} done</span>
-                                {{ range .Hosts }}
-                                <span class="host-tag {{ if eq .Status "done" }}ok{{ else if eq .Status "failed" }}fail{{ end }}"
-                                      title="{{ .Host }}: {{ printf "%.0f" .Progress }}%{{ if .Speed }} @ {{ .Speed }}{{ end }}">
-                                    {{ .Host }}
-                                </span>
-                                {{ end }}
-                            </div>
-                        </td>
-                        <td class="mono">{{ if gt .BytesTotal 0 }}{{ .BytesCurrent }}/{{ .BytesTotal }}{{ else }}—{{ end }}</td>
-                        <td class="mono">{{ if .Speed }}{{ .Speed }}{{ else }}—{{ end }}</td>
-                    </tr>
-                    {{ end }}
-                    {{ else }}
-                    <tr><td colspan="7" class="empty-state">No active uploads</td></tr>
-                    {{ end }}
-                </tbody>
-            </table>
-        </div>
-    </div>
+    </details>
 
     <!-- ════════ PIPELINE QUEUE ════════ -->
-    <div class="section">
-        <h2 class="section-title">Pipeline Queue <span class="count">{{ len .Uploads.Pending }}</span></h2>
-        <div class="table-wrap">
+    <details class="section">
+        <summary><span class="arrow">▶</span> Pipeline Queue <span class="count">{{ len .Uploads.Pending }}</span></summary>
+        <div class="section-body">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -682,12 +768,12 @@
                 </tbody>
             </table>
         </div>
-    </div>
+    </details>
 
     <!-- ════════ PIPELINE HISTORY ════════ -->
-    <div class="section">
-        <h2 class="section-title">Pipeline History <span class="count">{{ len .Uploads.History }}</span></h2>
-        <div class="table-wrap">
+    <details class="section">
+        <summary><span class="arrow">▶</span> Pipeline History <span class="count">{{ len .Uploads.History }}</span></summary>
+        <div class="section-body">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -715,15 +801,12 @@
                 </tbody>
             </table>
         </div>
-    </div>
+    </details>
 
     <!-- ════════ SYSTEM HEALTH ════════ -->
-    <div class="section">
-        <h2 class="section-title">
-            System Health
-            <button class="section-toggle" onclick="toggleSection('health-content', this)">▼</button>
-        </h2>
-        <div id="health-content">
+    <details class="section">
+        <summary><span class="arrow">▶</span> System Health</summary>
+        <div class="section-body">
             <div class="detail-grid">
                 <div class="detail-item">
                     <div class="label">Go Version</div>
@@ -757,15 +840,12 @@
                 </div>
             </div>
         </div>
-    </div>
+    </details>
 
     <!-- ════════ CONFIGURATION ════════ -->
-    <div class="section">
-        <h2 class="section-title">
-            Configuration
-            <button class="section-toggle" onclick="toggleSection('config-content', this)">▼</button>
-        </h2>
-        <div id="config-content">
+    <details class="section">
+        <summary><span class="arrow">▶</span> Configuration</summary>
+        <div class="section-body">
             <div class="detail-grid">
                 <div class="detail-item">
                     <div class="label">Output Dir</div>
@@ -817,13 +897,13 @@
                 </div>
             </div>
         </div>
-    </div>
+    </details>
 
     <!-- ════════ ORPHAN FILES ════════ -->
-    <div class="section">
-        <h2 class="section-title">Orphan Files <span class="count">{{ len .Orphans }}</span></h2>
-        <input type="text" class="filter-input" id="orphan-search" placeholder="Search orphan files..." oninput="filterOrphans()">
-        <div class="table-wrap">
+    <details class="section">
+        <summary><span class="arrow">▶</span> Orphan Files <span class="count">{{ len .Orphans }}</span></summary>
+        <div class="section-body">
+            <input type="text" class="filter-input" id="orphan-search" placeholder="Search orphan files..." oninput="filterOrphans()">
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -858,13 +938,13 @@
                 </tbody>
             </table>
         </div>
-    </div>
+    </details>
 
     <!-- ════════ DISK ════════ -->
-    <div class="section">
-        <h2 class="section-title">Disk Usage</h2>
-        <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <details class="section">
+        <summary><span class="arrow">▶</span> Disk Usage</summary>
+        <div class="section-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;margin-top:4px;">
                 <span style="font-size:13px;font-weight:600">{{ .Disk.Used }} / {{ .Disk.Total }}</span>
                 <span style="font-size:11px;color:var(--text-muted)">{{ .Disk.Free }} free</span>
             </div>
@@ -876,18 +956,29 @@
                 <span>{{ .Disk.UsedGB | printf "%.1f" }} GB / {{ .Disk.TotalGB | printf "%.1f" }} GB</span>
             </div>
         </div>
-    </div>
+    </details>
 
 </div>
 
 <script>
 (function() {
-    // Restore auto-refresh preference
     var ar = document.getElementById('auto-refresh');
     if (ar) {
         ar.checked = localStorage.getItem('admin-auto-refresh') === 'true';
         if (ar.checked) scheduleRefresh();
     }
+
+    // Persist section open/closed state
+    var sections = document.querySelectorAll('details.section');
+    sections.forEach(function(s) {
+        var key = 'admin-section-' + (s.querySelector('summary')?.textContent?.trim() || '');
+        var saved = localStorage.getItem(key);
+        if (saved === 'closed') s.removeAttribute('open');
+        else if (saved === 'open') s.setAttribute('open', '');
+        s.addEventListener('toggle', function() {
+            localStorage.setItem(key, this.open ? 'open' : 'closed');
+        });
+    });
 })();
 
 var refreshTimer = null;
@@ -916,14 +1007,6 @@ function channelAction(action, username) {
     }).catch(function() {
         location.reload();
     });
-}
-
-function toggleSection(id, btn) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    var hidden = el.style.display === 'none';
-    el.style.display = hidden ? '' : 'none';
-    btn.textContent = hidden ? '▲' : '▼';
 }
 
 function filterOrphans() {
