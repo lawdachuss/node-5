@@ -841,6 +841,7 @@ type ChannelAssignment struct {
 
 // AssignmentStats holds summary statistics for fair-share calculation.
 type AssignmentStats struct {
+	TotalPoolChannels  int `json:"total_pool_channels"`
 	TotalLiveChannels  int `json:"total_live_channels"`
 	TotalUnassigned    int `json:"total_unassigned"`
 	TotalAssignedNodes int `json:"total_assigned_nodes"`
@@ -919,6 +920,33 @@ func (c *Client) ReleaseNodeChannels(nodeID string) error {
 		})
 }
 
+// ReleaseExcessChannels releases up to `limit` channels from this node back to unassigned.
+// Returns the rows that were released.
+func (c *Client) ReleaseExcessChannels(nodeID string, limit int) ([]ChannelAssignment, error) {
+	resp, err := c.requestWithRetry("PATCH",
+		fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&status=neq.unassigned&order=username.desc&limit=%d",
+			url.QueryEscape(nodeID), limit),
+		map[string]interface{}{
+			"assigned_node": nil,
+			"status":        "unassigned",
+		})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var released []ChannelAssignment
+	if err := json.NewDecoder(resp.Body).Decode(&released); err != nil {
+		return nil, fmt.Errorf("decode released: %w", err)
+	}
+	return released, nil
+}
+
 // ReleaseChannel releases a single channel back to the pool.
 func (c *Client) ReleaseChannel(username, site string) error {
 	return c.patch(fmt.Sprintf("/channel_assignments?username=eq.%s&site=eq.%s", url.QueryEscape(username), url.QueryEscape(site)),
@@ -972,9 +1000,17 @@ func (c *Client) GetAllAssignments() ([]ChannelAssignment, error) {
 func (c *Client) GetAssignmentStats() (*AssignmentStats, error) {
 	stats := &AssignmentStats{}
 
-	// Count total unassigned channels (pool size)
+	// Count all channels in the pool
+	var all []ChannelAssignment
+	err := c.get("/channel_assignments?select=username&limit=50000", &all)
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalPoolChannels = len(all)
+
+	// Count total unassigned channels
 	var unassigned []ChannelAssignment
-	err := c.get("/channel_assignments?status=eq.unassigned&select=username&limit=50000", &unassigned)
+	err = c.get("/channel_assignments?status=eq.unassigned&select=username&limit=50000", &unassigned)
 	if err != nil {
 		return nil, err
 	}

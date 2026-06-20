@@ -53,54 +53,65 @@ func (c *Coordinator) ReleaseChannel(username, site string) {
 }
 
 // runClaimCycle executes one iteration of the fair-share claiming algorithm.
+// Claims channels if this node has less than its fair share, releases channels
+// if it has more than its fair share (only when multiple nodes are alive).
 func (c *Coordinator) runClaimCycle() {
-	// 1. Get current assignment stats
 	stats, err := c.Client.GetAssignmentStats()
 	if err != nil {
 		log.Printf("[coordinator] claim cycle: get stats error: %v", err)
 		return
 	}
 
-	// 2. Calculate fair share based on total unassigned channels
-	poolSize := stats.TotalUnassigned + stats.TotalAssignedNodes // rough total pool size
+	totalPool := stats.TotalPoolChannels
 	totalNodes := stats.TotalAliveNodes
 	if totalNodes == 0 {
 		totalNodes = 1
 	}
-	fairShare := int(math.Ceil(float64(poolSize) / float64(totalNodes)))
+	fairShare := int(math.Ceil(float64(totalPool) / float64(totalNodes)))
 
-	// 3. Get our current load
 	myLoad, err := c.Client.CountMyAssignments(c.NodeID)
 	if err != nil {
 		log.Printf("[coordinator] claim cycle: count error: %v", err)
 		return
 	}
 
-	// 4. If we're at or above fair share, don't claim
-	if myLoad >= fairShare {
-		return
+	// Release excess channels if we have more than our fair share
+	if myLoad > fairShare && totalNodes > 1 {
+		excess := myLoad - fairShare
+		released, err := c.Client.ReleaseExcessChannels(c.NodeID, excess)
+		if err != nil {
+			log.Printf("[coordinator] claim cycle: release excess error: %v", err)
+			return
+		}
+		if len(released) > 0 {
+			log.Printf("[coordinator] released %d excess channel(s) (load: %d -> %d, fairShare: %d, totalPool: %d)",
+				len(released), myLoad, myLoad-len(released), fairShare, totalPool)
+			for _, ca := range released {
+				if c.Manager != nil {
+					c.Manager.RemoveChannelForReassignment(ca.Username)
+				}
+			}
+		}
+		return // let next cycle do the claiming to avoid races
 	}
 
-	// 5. Claim up to (fairShare - myLoad) channels
-	budget := fairShare - myLoad
-	claimed, err := c.Client.ClaimChannels(c.NodeID, budget)
-	if err != nil {
-		log.Printf("[coordinator] claim cycle: claim error: %v", err)
-		return
-	}
-
-	if len(claimed) == 0 {
-		return
-	}
-
-	log.Printf("[coordinator] claimed %d new channel(s) (load: %d -> %d, fairShare: %d, poolSize: %d)",
-		len(claimed), myLoad, myLoad+len(claimed), fairShare, poolSize)
-
-	// 6. Convert assignments to channels via the manager
-	for _, ca := range claimed {
-		if c.Manager != nil {
-			if err := c.Manager.CreateChannelFromAssignment(&ca); err != nil {
-				log.Printf("[coordinator] error creating channel from assignment %s: %v", ca.Username, err)
+	// Claim channels if we have fewer than our fair share
+	if myLoad < fairShare {
+		budget := fairShare - myLoad
+		claimed, err := c.Client.ClaimChannels(c.NodeID, budget)
+		if err != nil {
+			log.Printf("[coordinator] claim cycle: claim error: %v", err)
+			return
+		}
+		if len(claimed) > 0 {
+			log.Printf("[coordinator] claimed %d new channel(s) (load: %d -> %d, fairShare: %d, totalPool: %d)",
+				len(claimed), myLoad, myLoad+len(claimed), fairShare, totalPool)
+			for _, ca := range claimed {
+				if c.Manager != nil {
+					if err := c.Manager.CreateChannelFromAssignment(&ca); err != nil {
+						log.Printf("[coordinator] error creating channel from assignment %s: %v", ca.Username, err)
+					}
+				}
 			}
 		}
 	}
