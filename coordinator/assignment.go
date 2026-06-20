@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/database"
@@ -66,6 +67,11 @@ func (c *Coordinator) runClaimCycle() {
 	totalNodes := stats.TotalAliveNodes
 	if totalNodes == 0 {
 		totalNodes = 1
+	}
+	// In pooled mode, assume at least 2 nodes to prevent one node from claiming
+	// everything before other nodes register their heartbeats.
+	if strings.HasPrefix(c.NodeID, "node-") && totalNodes < 2 {
+		totalNodes = 2
 	}
 	fairShare := int(math.Ceil(float64(totalPool) / float64(totalNodes)))
 

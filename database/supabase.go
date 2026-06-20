@@ -921,11 +921,30 @@ func (c *Client) ReleaseNodeChannels(nodeID string) error {
 }
 
 // ReleaseExcessChannels releases up to `limit` channels from this node back to unassigned.
-// Returns the rows that were released.
+// Uses a two-step approach (GET usernames, then PATCH by username) because
+// PostgREST PATCH ignores the `limit` parameter.
 func (c *Client) ReleaseExcessChannels(nodeID string, limit int) ([]ChannelAssignment, error) {
+	// Step 1: GET the usernames we want to release
+	var target []ChannelAssignment
+	err := c.get(
+		fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&status=neq.unassigned&select=username,site&order=username.desc&limit=%d",
+			url.QueryEscape(nodeID), limit), &target)
+	if err != nil {
+		return nil, err
+	}
+	if len(target) == 0 {
+		return nil, nil
+	}
+
+	// Step 2: PATCH only those specific channels
+	usernames := make([]string, len(target))
+	for i, ca := range target {
+		usernames[i] = ca.Username
+	}
+
 	resp, err := c.requestWithRetry("PATCH",
-		fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&status=neq.unassigned&order=username.desc&limit=%d",
-			url.QueryEscape(nodeID), limit),
+		fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&username=in.(%s)",
+			url.QueryEscape(nodeID), joinEscaped(usernames)),
 		map[string]interface{}{
 			"assigned_node": nil,
 			"status":        "unassigned",
