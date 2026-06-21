@@ -288,8 +288,23 @@ func CreateChannel(c *gin.Context) {
 		return
 	}
 
+	usernames := strings.Split(req.Username, ",")
+	if client := server.GetDBClient(); client != nil {
+		var conflicts []string
+		for _, username := range usernames {
+			existing, err := client.GetChannel(username)
+			if err == nil && existing != nil {
+				conflicts = append(conflicts, username)
+			}
+		}
+		if len(conflicts) > 0 {
+			c.String(http.StatusConflict, "Channel(s) already exist in database: %s", strings.Join(conflicts, ", "))
+			return
+		}
+	}
+
 	var lastErr error
-	for _, username := range strings.Split(req.Username, ",") {
+	for _, username := range usernames {
 		if err := server.Manager.CreateChannel(&entity.ChannelConfig{
 			Site:                    req.Site,
 			Username:                username,
