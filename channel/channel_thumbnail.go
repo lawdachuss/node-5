@@ -270,7 +270,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	//   60 min:  12 clips × 0.5s = 6s (5 min between clips)
 	//
 	// Uploaded to Catbox.moe (free, permanent, CDN-backed) with PixelDrain
-	// and GoFile as fallbacks.
+	// and PixelDrain as fallbacks.
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -410,7 +410,6 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		catboxUploader := uploader.NewCatboxUploader()
 		pixeldrainUploader := uploader.NewPixelDrainUploader(os.Getenv("PIXELDRAIN_API_KEY"))
 		lobfileUploader := uploader.NewLobFileUploader(os.Getenv("LOBFILE_API_KEY"))
-
 		var remoteURL string
 		var uploadErr error
 

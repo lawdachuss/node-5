@@ -243,10 +243,9 @@ func New(c *cli.Context) (*entity.Config, error) {
 	}
 
 	sessionDuration := c.String("session-duration")
-	if sessionDuration == "" {
-		sessionDuration = "5h20m0s"
-	}
-	if sessionDuration != "0" {
+	// When SESSION_DURATION is not set, leave as 0 for continuous recording.
+	// The flag default is "".  Only parse when a non-empty, non-zero value is given.
+	if sessionDuration != "" && sessionDuration != "0" {
 		parsed, err := time.ParseDuration(sessionDuration)
 		if err != nil {
 			return nil, fmt.Errorf("parse session-duration %q: %w", sessionDuration, err)

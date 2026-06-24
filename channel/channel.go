@@ -349,8 +349,10 @@ func (ch *Channel) Pause() {
 		}
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel any previous pause context to prevent goroutine leaks on double Pause.
 	ch.cancelMu.Lock()
+	ch.PauseCancelFunc()
+	ctx, cancel := context.WithCancel(context.Background())
 	ch.PauseCancelFunc = cancel
 	ch.cancelMu.Unlock()
 	go ch.CheckOnlineWhilePaused(ctx, 0)
@@ -394,21 +396,26 @@ func (ch *Channel) Resume(_ int) {
 	ch.cancelMu.Lock()
 	ch.PauseCancelFunc()
 	ch.cancelMu.Unlock()
-	ch.Config.IsPaused.Store(false)
 
+	// Wait for the previous Monitor goroutine to fully exit before starting
+	// a new one. Pause() already cancelled the Monitor's context via
+	// CancelFunc(), so the old Monitor is on its way out.  Waiting avoids
+	// a TOCTOU race where Resume() runs before the Monitor goroutine's defer
+	// has a chance to finish cleanup, leaving the channel without any Monitor.
+	ch.monitorWg.Wait()
+
+	ch.Config.IsPaused.Store(false)
 	ch.Update()
 	ch.Info("channel resumed")
 
 	ch.monitorWg.Add(1)
 	go func() {
 		defer ch.monitorWg.Done()
-		// Check again right before starting monitor
 		select {
 		case <-ch.done:
 			return
 		default:
 		}
-
 		ch.Monitor()
 	}()
 }

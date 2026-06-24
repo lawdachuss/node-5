@@ -778,9 +778,13 @@ sessionWait:
 		log.Println("[session] upload-complete.flag written")
 	}
 
-	m.sessionMu.Lock()
-	m.sessionStarted = false
-	m.sessionMu.Unlock()
+	// Restart the session: resume channels, restart the watcher, and begin
+	// the next recording cycle.  We keep sessionStarted = true so no other
+	// caller can start a duplicate session loop.
+	log.Println("[session] restarting recording session")
+	m.ResumeAllChannels()
+	m.StartWatcher()
+	m.sessionLoop(d)
 }
 
 // IsFileUploadInFlight returns true if the given file path is currently

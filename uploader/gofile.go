@@ -65,7 +65,7 @@ type uploadResponse struct {
 	} `json:"data"`
 }
 
-// Upload uploads a file to GoFile and returns the download link
+// Upload uploads a file to GoFile and returns the download page link.
 func (u *GoFileUploader) Upload(filePath string) (string, error) {
 	return u.UploadWithProgress(filePath, nil)
 }
@@ -75,7 +75,6 @@ func (u *GoFileUploader) UploadWithProgress(filePath string, progress ProgressFu
 	gofileSem <- struct{}{}
 	defer func() { <-gofileSem }()
 
-	var downloadLink string
 	var lastErr error
 
 	maxAttempts := 4
@@ -95,7 +94,7 @@ func (u *GoFileUploader) UploadWithProgress(filePath string, progress ProgressFu
 		}
 
 		// Step 2: Upload the file
-		downloadLink, err = u.uploadFile(server, filePath, progress)
+		url, err := u.uploadFile(server, filePath, progress)
 		if err != nil {
 			lastErr = fmt.Errorf("upload file: %w", err)
 			if isUploadRateLimited(err) {
@@ -111,7 +110,7 @@ func (u *GoFileUploader) UploadWithProgress(filePath string, progress ProgressFu
 		}
 
 		// Success!
-		return downloadLink, nil
+		return url, nil
 	}
 
 	return "", lastErr

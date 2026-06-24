@@ -1,26 +1,27 @@
 package uploader
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// CatboxUploader handles uploading images to Catbox.moe.
-// No API key required — anonymous uploads are supported.
+// CatboxUploader handles uploading files to Catbox.moe.
+// Anonymous uploads are supported. For more reliable uploads, set the
+// CATBOX_USERHASH environment variable (find it on catbox.moe after logging in).
 type CatboxUploader struct {
-	client *http.Client
+	client   *http.Client
+	userhash string
 }
 
 // NewCatboxUploader creates a new Catbox.moe uploader.
-// Always connects directly — Catbox is CDN-backed and accessible from any IP.
-// The SOCKS5 proxy is only needed for Chaturbate/Stripchat stream access.
+// Reads CATBOX_USERHASH from the environment for authenticated uploads.
 func NewCatboxUploader() *CatboxUploader {
 	transport := &http.Transport{
 		MaxIdleConns:          100,
@@ -32,20 +33,21 @@ func NewCatboxUploader() *CatboxUploader {
 
 	return &CatboxUploader{
 		client: &http.Client{
-			Timeout:   2 * time.Minute,
+			Timeout:   5 * time.Minute, // 5 min for larger preview MP4s
 			Transport: transport,
 		},
+		userhash: os.Getenv("CATBOX_USERHASH"),
 	}
 }
 
 // Upload uploads a file to Catbox.moe and returns the direct file URL.
-// Retries up to 3 times with exponential backoff (2s, 4s) on transient errors
-// (network failures and 5xx server errors). Client errors (4xx) are fatal.
+// Retries up to 3 times with exponential backoff (2s, 4s) on transient errors.
 //
 // API: POST https://catbox.moe/user/api.php
 // Fields: reqtype=fileupload, fileToUpload=@file (multipart)
+//         userhash=<hash> (optional, for authenticated uploads)
 // Response on success: plain text URL like "https://files.catbox.moe/abc123.webp"
-// Response on error: plain text error message starting with an error description.
+// Response on error: plain text error message.
 func (u *CatboxUploader) Upload(filePath string) (string, error) {
 	var lastErr error
 
@@ -62,8 +64,6 @@ func (u *CatboxUploader) Upload(filePath string) (string, error) {
 
 		lastErr = err
 
-		// Only retry on transient errors: network/IO failures or server errors.
-		// Client-side errors (bad response format) are fatal.
 		if isRetryableCatboxError(err) {
 			continue
 		}
@@ -74,59 +74,124 @@ func (u *CatboxUploader) Upload(filePath string) (string, error) {
 	return "", fmt.Errorf("catbox: all %d attempts failed, last: %w", 5, lastErr)
 }
 
-// uploadOnce performs a single upload attempt without retry logic.
-// The file is streamed through an io.Pipe so large images are never buffered
-// in RAM — only the multipart preamble (headers + form fields) is assembled
-// upfront, which is always small (< 1 KB).
+// mimeTypeFor returns an appropriate Content-Type for a file extension.
+// Catbox expects application/octet-stream for most file types.
+func mimeTypeFor(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".webp":
+		return "image/webp"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// uploadOnce streams the file through io.Pipe with a standard multipart writer.
+// This is the canonical Go approach to multipart uploads — it guarantees
+// correct boundary formatting and part ordering that Catbox expects.
 func (u *CatboxUploader) uploadOnce(filePath string) (string, error) {
-	fi, err := os.Stat(filePath)
-	if err != nil {
-		return "", fmt.Errorf("catbox: stat file: %w", err)
-	}
-
-	// Build the multipart preamble (all headers and form fields, but NOT the
-	// file bytes) into a small buffer so we can compute the exact Content-Length
-	// and avoid chunked transfer encoding.
-	var preamble bytes.Buffer
-	mw := multipart.NewWriter(&preamble)
-
-	if err := mw.WriteField("reqtype", "fileupload"); err != nil {
-		return "", fmt.Errorf("catbox: write reqtype: %w", err)
-	}
-	if _, err := mw.CreateFormFile("fileToUpload", filepath.Base(filePath)); err != nil {
-		return "", fmt.Errorf("catbox: create form file: %w", err)
-	}
-	closing := fmt.Sprintf("\r\n--%s--\r\n", mw.Boundary())
-	contentType := mw.FormDataContentType()
-
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("catbox: open file: %w", err)
 	}
 	defer file.Close()
 
-	totalLen := int64(preamble.Len()) + fi.Size() + int64(len(closing))
-	body := io.MultiReader(&preamble, file, bytes.NewReader([]byte(closing)))
+	// Use io.Pipe so the multipart writer writes directly into the request body,
+	// streaming the file without buffering it in RAM. The multipart writer
+	// handles all boundary formatting correctly.
+	pipeReader, pipeWriter := io.Pipe()
+	writer := multipart.NewWriter(pipeWriter)
 
-	req, err := http.NewRequest("POST", "https://catbox.moe/user/api.php", body)
+	errChan := make(chan error, 1)
+	go func() {
+		defer pipeWriter.Close()
+		defer writer.Close()
+
+		// reqtype is always required
+		if err := writer.WriteField("reqtype", "fileupload"); err != nil {
+			errChan <- fmt.Errorf("write reqtype: %w", err)
+			return
+		}
+
+		// Send userhash if available (authenticated uploads are more reliable)
+		if u.userhash != "" {
+			if err := writer.WriteField("userhash", u.userhash); err != nil {
+				errChan <- fmt.Errorf("write userhash: %w", err)
+				return
+			}
+		}
+
+		// Use CreatePart instead of CreateFormFile so we can set the correct
+		// Content-Type for the file (video/mp4 vs application/octet-stream).
+		// Catbox may handle files differently based on MIME type.
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition",
+			fmt.Sprintf(`form-data; name="fileToUpload"; filename="%s"`, filepath.Base(filePath)))
+		h.Set("Content-Type", mimeTypeFor(filePath))
+		part, err := writer.CreatePart(h)
+		if err != nil {
+			errChan <- fmt.Errorf("create form file: %w", err)
+			return
+		}
+
+		if _, err := io.Copy(part, file); err != nil {
+			errChan <- fmt.Errorf("copy file: %w", err)
+			return
+		}
+
+		errChan <- nil
+	}()
+
+	req, err := http.NewRequest("POST", "https://catbox.moe/user/api.php", pipeReader)
 	if err != nil {
+		pipeReader.CloseWithError(err)
 		return "", fmt.Errorf("catbox: create request: %w", err)
 	}
-	req.ContentLength = totalLen
-	req.Header.Set("Content-Type", contentType)
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Origin", "https://catbox.moe")
 	req.Header.Set("Referer", "https://catbox.moe/")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Priority", "u=1, i")
 
 	resp, err := u.client.Do(req)
 	if err != nil {
+		pipeReader.CloseWithError(err)
+		// Drain error channel to avoid goroutine leak
+		select {
+		case <-errChan:
+		case <-time.After(5 * time.Second):
+		}
 		return "", fmt.Errorf("catbox: send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024)) // 64KB max response
+	// Check for errors from the goroutine
+	select {
+	case err := <-errChan:
+		if err != nil {
+			return "", err
+		}
+	case <-time.After(30 * time.Second):
+		return "", fmt.Errorf("catbox: timeout waiting for file copy to complete")
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
 		return "", fmt.Errorf("catbox: read response: %w", err)
 	}
@@ -149,34 +214,25 @@ func (u *CatboxUploader) uploadOnce(filePath string) (string, error) {
 }
 
 // isRetryableCatboxError returns true if the error represents a transient
-// failure that might succeed on retry (network glitch, server overload,
-// or IP-based rate limiting).
+// failure that might succeed on retry.
 func isRetryableCatboxError(err error) bool {
 	errStr := err.Error()
 
-	// Server-side HTTP errors (5xx) — retry
 	if strings.Contains(errStr, "status 5") {
 		return true
 	}
 
-	// "Invalid uploader" (HTTP 412) is often a transient IP block or
-	// rate-limit from Catbox's abuse prevention. Retry with backoff.
+	// "Invalid uploader" (HTTP 412) — Catbox may be rate-limiting or
+	// blocking the IP. Sleep with backoff and retry.
 	if strings.Contains(errStr, "Invalid uploader") {
 		return true
 	}
 
-	// File stat errors — retry (AV scanner race on Windows)
-	if strings.Contains(errStr, "stat file") {
+	if strings.Contains(errStr, "stat file") || strings.Contains(errStr, "open file") {
 		return true
 	}
 
-	// Network/connection errors — retry
-	if strings.Contains(errStr, "send request") {
-		return true
-	}
-
-	// Read errors — retry (could be temporary server reset)
-	if strings.Contains(errStr, "read response") {
+	if strings.Contains(errStr, "send request") || strings.Contains(errStr, "read response") {
 		return true
 	}
 

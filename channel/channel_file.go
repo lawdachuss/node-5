@@ -196,8 +196,12 @@ func (ch *Channel) processPendingFile(pf pendingFile) {
 			// Normalize fMP4 timestamps: Stripchat's LL-HLS segments carry
 			// absolute server timestamps (e.g. start at 5044s), making the
 			// file appear hours long.  A fast ffmpeg stream-copy remux resets
-			// the timeline.
-			normalized, _ := normalizeFMP4Timestamps(videoPath)
+			// the timeline.  If normalization fails, the file proceeds with
+			// its original (possibly inflated) duration.
+			normalized, normErr := normalizeFMP4Timestamps(videoPath)
+			if normErr != nil {
+				ch.Warn("normalize: could not reset timestamps for %s: %v — uploading with original timestamps", filepath.Base(videoPath), normErr)
+			}
 			ch.MoveToOutputDir(normalized)
 		}
 	}
@@ -281,7 +285,9 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 		// The muxed output was created with -copyts, which preserves the
 		// original fMP4 absolute timestamps (e.g. PTS=5044s).  Normalize
 		// so the file plays correctly from the start.
-		normalizeFMP4Timestamps(finalOutput)
+		if _, normErr := normalizeFMP4Timestamps(finalOutput); normErr != nil {
+			ch.Warn("normalize: could not reset timestamps on muxed output %s: %v — uploading with original timestamps", filepath.Base(finalOutput), normErr)
+		}
 		ch.MoveToOutputDir(finalOutput)
 	}
 }
@@ -910,6 +916,8 @@ func removeFileWithRetry(path string) error {
 func muxVideoAudio(videoPath, audioPath, outputPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	config.AcquireFFmpeg()
+	defer config.ReleaseFFmpeg()
 	cmd := config.FFmpegCommandContext(ctx, "-y",
 		"-i", videoPath,
 		"-i", audioPath,

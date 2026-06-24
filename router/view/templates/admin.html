@@ -566,7 +566,7 @@
             <span class="arrow">▶</span>
             Active Uploads <span class="count">{{ len .Uploads.Active }}</span>
             {{ if gt (len .Uploads.Active) 0 }}
-            <span class="badge uploading">{{ len .Uploads.Active }} uploading</span>
+            <span class="badge uploading" id="uploads-summary" style="{{ if not .Uploads.Active }}display:none{{ end }}">{{ len .Uploads.Active }} uploading</span>
             {{ end }}
         </summary>
         <div class="section-body">
@@ -582,7 +582,7 @@
                         <th>Speed</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="uploads-table-body">
                     {{ if .Uploads.Active }}
                     {{ range .Uploads.Active }}
                     <tr>
@@ -958,7 +958,7 @@
                 <span style="font-size:11px;color:var(--text-muted)">{{ .Disk.Free }} free</span>
             </div>
             <div class="disk-bar">
-                <div class="fill {{ if gt .Disk.Percent 80 }}" style="width:{{ .Disk.Percent }}%;background:linear-gradient(90deg,#ef4444,#dc2626)"{{ else if gt .Disk.Percent 60 }}" style="width:{{ .Disk.Percent }}%;background:linear-gradient(90deg,#f59e0b,#d97706)"{{ else }}" style="width:{{ .Disk.Percent }}%;background:linear-gradient(90deg,#10b981,#059669)"{{ end }}></div>
+                <div class="fill" style="width:{{ .Disk.Percent }}%;{{ if gt .Disk.Percent 80 }}background:linear-gradient(90deg,#ef4444,#dc2626){{ else if gt .Disk.Percent 60 }}background:linear-gradient(90deg,#f59e0b,#d97706){{ else }}background:linear-gradient(90deg,#10b981,#059669){{ end }}"></div>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:4px;">
                 <span>{{ .Disk.Percent }}% used</span>
@@ -972,9 +972,10 @@
 <script>
 (function() {
     var ar = document.getElementById('auto-refresh');
-    if (ar) {
-        ar.checked = localStorage.getItem('admin-auto-refresh') === 'true';
-        if (ar.checked) scheduleRefresh();
+    ar.checked = localStorage.getItem('admin-auto-refresh') !== 'false';
+    if (ar.checked) {
+        startLivePoll();
+        scheduleRefresh();
     }
 
     // Theme toggle button
@@ -997,21 +998,125 @@
 })();
 
 var refreshTimer = null;
+var livePollTimer = null;
+
 function toggleAutoRefresh() {
     var cb = document.getElementById('auto-refresh');
     localStorage.setItem('admin-auto-refresh', cb.checked);
     if (cb.checked) {
+        startLivePoll();
         scheduleRefresh();
-    } else if (refreshTimer) {
-        clearTimeout(refreshTimer);
-        refreshTimer = null;
+    } else {
+        stopLivePoll();
+        if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
     }
 }
+
+function startLivePoll() {
+    stopLivePoll();
+    // Poll uploads every 3s for live progress updates
+    livePollTimer = setInterval(pollUploads, 3000);
+}
+
+function stopLivePoll() {
+    if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
+}
+
+function pollUploads() {
+    fetch('/api/uploads')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data) return;
+            updateUploadsSection(data);
+            updateMetricsUploads(data);
+        })
+        .catch(function() {/* silent */});
+}
+
+function updateMetricsUploads(data) {
+    var active = (data.active || []).length;
+    var pending = (data.pending || []).length;
+    var hist = (data.history || []).length;
+
+    // Update metrics cards without full page reload
+    var cards = document.querySelectorAll('.metric-card');
+    if (cards.length >= 5) {
+        var activeCard = cards[4];
+        var val = activeCard.querySelector('.value');
+        var sub = activeCard.querySelector('.sub');
+        if (val) val.textContent = active;
+        if (sub) sub.textContent = pending + ' pending';
+    }
+    if (cards.length >= 6) {
+        var histCard = cards[5];
+        var val = histCard.querySelector('.value');
+        if (val) val.textContent = hist;
+    }
+
+
+}
+
+function updateUploadsSection(data) {
+    var active = (data.active || []);
+    var container = document.getElementById('uploads-table-body');
+    var summary = document.getElementById('uploads-summary');
+    if (!container) return;
+
+    if (active.length === 0) {
+        container.innerHTML = '<tr><td colspan="7" class="empty-state">No active uploads</td></tr>';
+        if (summary) {
+            summary.innerHTML = '<span class="badge">0 uploading</span>';
+            summary.style.display = 'none';
+        }
+        return;
+    }
+
+    var html = '';
+    for (var i = 0; i < active.length; i++) {
+        var c = active[i];
+        var pct = Math.min(Math.max(c.progress || 0, 0), 100);
+        var hostRows = '';
+        if (c.hosts && c.hosts.length > 0) {
+            hostRows = '<div class="host-list"><span class="host-tag">' + (c.host_count || 0) + '/' + (c.host_total || '?') + ' done</span>';
+            for (var j = 0; j < c.hosts.length; j++) {
+                var h = c.hosts[j];
+                var cls = h.status === 'done' ? 'ok' : h.status === 'failed' ? 'fail' : '';
+                hostRows += '<span class="host-tag ' + cls + '" title="' + escAttr(h.host || '') + ': ' + Math.round(h.progress || 0) + '%' + (h.speed ? ' @ ' + h.speed : '') + '">' + escHtml(h.host || '') + '</span>';
+            }
+            hostRows += '</div>';
+        }
+        html += '<tr>'
+            + '<td><strong>' + escHtml(c.channel || '') + '</strong></td>'
+            + '<td class="mono truncate" title="' + escAttr(c.filename || '') + '">' + escHtml(c.filename || '') + '</td>'
+            + '<td><span class="status-badge active">' + escHtml(c.status || '') + '</span></td>'
+            + '<td style="min-width:140px">' + Math.round(pct) + '%<div class="progress-bar"><div class="fill ok" style="width:' + pct + '%"></div></div></td>'
+            + '<td>' + (hostRows || '<span style="color:var(--text-muted);font-size:10px">—</span>') + '</td>'
+            + '<td class="mono">' + (c.bytes_total > 0 ? (c.bytes_current || 0) + '/' + (c.bytes_total || 0) : '—') + '</td>'
+            + '<td class="mono">' + (c.speed || '—') + '</td>'
+            + '</tr>';
+    }
+    container.innerHTML = html;
+
+    if (summary) {
+        summary.innerHTML = '<span class="badge uploading">' + active.length + ' uploading</span>';
+        summary.style.display = '';
+    }
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function scheduleRefresh() {
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(function() {
         location.reload();
-    }, 30000);
+    }, 12000);
 }
 
 function toggleTheme() {
@@ -1065,12 +1170,15 @@ function retryOrphan(path, btn) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({paths: [path]})
     }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.length > 0 && data[0].status === 'queued') {
-            btn.textContent = 'Queued';
-            btn.style.opacity = '0.5';
+        var results = (data && data.results) || [];
+        if (results.length > 0 && results[0].status === 'success') {
+            btn.textContent = 'Done';
+            btn.style.background = 'rgba(16,185,129,0.15)';
+            btn.style.color = '#10b981';
             setTimeout(function() { location.reload(); }, 3000);
         } else {
-            btn.textContent = 'Failed';
+            var err = results.length > 0 ? results[0].error : 'unknown';
+            btn.textContent = err ? err.substring(0, 20) : 'Failed';
             btn.style.background = 'rgba(239,68,68,0.15)';
             btn.style.color = '#ef4444';
         }

@@ -188,6 +188,8 @@ func (ch *Channel) MuxAV(videoPath, audioPath, outputPath string) error {
 		outputPath,
 	}
 
+	config.AcquireFFmpeg()
+	defer config.ReleaseFFmpeg()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := config.FFmpegCommandContext(ctx, args...)
