@@ -235,6 +235,22 @@ func AdminPage(c *gin.Context) {
 		totalNodeLoad += n.CurrentLoad
 	}
 
+	// Cross-reference assignments with live ChannelInfo so the Pool table's
+	// "Live" column reflects actual recording state rather than the stale
+	// is_live flag from the database (which is only updated by the coordinator's
+	// periodic API check and can fall out of sync).
+	onlineChannels := make(map[string]bool, len(channels))
+	for _, ch := range channels {
+		if ch.IsOnline {
+			onlineChannels[ch.Username] = true
+		}
+	}
+	for i := range assignments {
+		if onlineChannels[assignments[i].Username] {
+			assignments[i].IsLive = true
+		}
+	}
+
 	c.HTML(200, "admin.html", &AdminData{
 		Config:   server.Config,
 		Channels: channels,
