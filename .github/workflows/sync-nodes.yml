@@ -22,6 +22,8 @@ jobs:
           SYNC_PAT: ${{ secrets.SYNC_PAT }}
         run: |
           set -e
+          # Unset the auth header set by actions/checkout so URL credentials are used
+          git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
           for repo in lawdachuss/node-2 lawdachuss/node-3 lawdachuss/node-4 lawdachuss/node-5; do
             echo "=== Syncing to $repo ==="
             git push --force "https://${SYNC_PAT}@github.com/${repo}.git" main
