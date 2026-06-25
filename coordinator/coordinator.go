@@ -209,7 +209,7 @@ func (c *Coordinator) currentLoad() int {
 // detectNodeID auto-detects the node identity using a priority chain:
 // 1. NODE_ID env var (explicit)
 // 2. GITHUB_REPOSITORY env var — splits by "-" and takes the last segment
-//    so "owner/MiniDelectableService-node-a" yields "a"
+//    so "owner/node-1" yields "1"
 // 3. os.Hostname() (VPS / local)
 // 4. Random fallback (defensive)
 //

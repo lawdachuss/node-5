@@ -2,7 +2,7 @@
 .SYNOPSIS
     Sets up a new node repository for distributed shards mode.
 .DESCRIPTION
-    Creates a new GitHub repo (MiniDelectableService-<node-id>), configures secrets,
+    Creates a new GitHub repo (node-<node-id>), configures secrets,
     and runs the initial migration to prepare it for pooled recording.
 .PARAMETER NodeId
     The node identifier (e.g., "node-a", "node-b").
@@ -38,7 +38,7 @@ if ($NodeId -notmatch '^[a-zA-Z0-9_-]+$') {
     exit 1
 }
 
-$RepoName = "MiniDelectableService-$NodeId"
+$RepoName = "node-$NodeId"
 $Org = "YOUR_ORG"  # Change to your GitHub org/username
 
 Write-Host "=== Setting up node: $NodeId ===" -ForegroundColor Cyan
@@ -48,7 +48,7 @@ Write-Host "Repo: $Org/$RepoName" -ForegroundColor Cyan
 Write-Host "[1/5] Creating GitHub repository..." -ForegroundColor Yellow
 $body = @{
     name        = $RepoName
-    description = "MiniDelectableService node: $NodeId"
+    description = "Node: $NodeId"
     auto_init   = $false
     @{private}  = $true
 } | ConvertTo-Json
@@ -95,8 +95,7 @@ Write-Host "  URL: $SupabaseUrl" -ForegroundColor Gray
 
 # ── Step 4: Link template repo ─────────────────────────────────────────
 Write-Host "[4/5] Configuring sync..." -ForegroundColor Yellow
-Write-Host "  Push to main branch of $Org/MiniDelectableService to auto-sync to $RepoName"
-Write-Host "  The .github/workflows/sync-nodes.yml workflow handles this." -ForegroundColor Gray
+Write-Host "  Push code directly to $Org/$RepoName to deploy"
 
 # ── Step 5: Verify ─────────────────────────────────────────────────────
 Write-Host "[5/5] Verification..." -ForegroundColor Yellow

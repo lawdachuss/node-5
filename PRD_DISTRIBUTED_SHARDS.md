@@ -315,9 +315,7 @@ Every 120s: find nodes with `last_heartbeat < NOW() - 180s`, reclaim their chann
 ---
 
 ## 10. Deployment & Multi-Repo CI/CD
-
-**Template repo**: `MiniDelectableService` — main development, `sync-nodes.yml` pushes to node repos
-**Node repos**: `MiniDelectableService-node-a`, `node-b`, `node-c` — each has own secure-rdp workflow
+**Node repos**: `node-1` … `node-5` — each has own secure-rdp workflow
 
 Sync workflow:
 ```yaml

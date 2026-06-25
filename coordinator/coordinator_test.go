@@ -47,8 +47,8 @@ func TestDetectNodeID(t *testing.T) {
 		},
 		{
 			name:     "from GITHUB_REPOSITORY with dashed suffix",
-			envs:     map[string]string{"GITHUB_REPOSITORY": "owner/MiniDelectableService-node-a"},
-			expected: "a",
+			envs:     map[string]string{"GITHUB_REPOSITORY": "owner/node-1"},
+			expected: "1",
 		},
 		{
 			name:     "simple repo name (no dashes) — slash replaced with dash",

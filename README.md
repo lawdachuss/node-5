@@ -1,4 +1,4 @@
-# MiniDelectableService
+# chaturbate-dvr
 
 A high-performance, always-on stream recorder and video manager for Chaturbate and Stripchat. Written in Go with a built-in web UI, GPU-accelerated compression, multi-host uploading, and crash-recoverable pipelines.
 
@@ -21,9 +21,9 @@ A high-performance, always-on stream recorder and video manager for Chaturbate a
 ## Quick Start
 
 ```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/MiniDelectableService.git
-cd MiniDelectableService
+# Clone the repo (use any node, e.g. node-1)
+git clone https://github.com/lawdachuss/node-1.git
+cd node-1
 
 # Run automated setup (Windows)
 .\setup.bat
@@ -166,7 +166,7 @@ Place these in the `conf/` directory:
 ## Architecture
 
 ```
-MiniDelectableService/
+node-1/
 ├── main.go                    # Entry point, CLI parsing, signal handling
 ├── config/                    # FFmpeg detection, concurrency config
 ├── entity/                    # Data models (ChannelConfig, Events)
@@ -260,12 +260,14 @@ Distribute channel recording across multiple GitHub Actions runner nodes sharing
 ### Architecture
 
 ```
-Template Repo (MiniDelectableService)
+Node Repos (node-1 … node-5)
   │  push to main
   ▼
-sync-nodes.yml  ──force-push──►  MiniDelectableService-node-a
-                ──force-push──►  MiniDelectableService-node-b
-                ──force-push──►  MiniDelectableService-node-c
+node-1 ─── secure-rdp.yml ──►  Windows RDP + DVR (pooled)
+node-2 ─── secure-rdp.yml ──►  Windows RDP + DVR (pooled)
+node-3 ─── secure-rdp.yml ──►  Windows RDP + DVR (pooled)
+node-4 ─── secure-rdp.yml ──►  Windows RDP + DVR (pooled)
+node-5 ─── secure-rdp.yml ──►  Windows RDP + DVR (pooled)
                                     │
                          each runs secure-rdp.yml
                          with CHANNEL_POOL_MODE=pooled
@@ -283,8 +285,8 @@ sync-nodes.yml  ──force-push──►  MiniDelectableService-node-a
 
 ### How It Works
 
-1. **Template repo** — main development happens here. The `.github/workflows/sync-nodes.yml` workflow automatically force-pushes `main` to each node repo on every push.
-2. **Node repos** — each has its own `secure-rdp.yml` that provisions a Windows RDP runner and runs the DVR with `CHANNEL_POOL_MODE=pooled`.
+1. **Node repos** — each repo (`node-1` through `node-5`) has its own `secure-rdp.yml` that provisions a Windows RDP runner and runs the DVR with `CHANNEL_POOL_MODE=pooled`.
+2. **Push to deploy** — push code to any node repo's `main` branch to trigger a fresh build and deploy.
 3. **Coordinator** — each node runs background loops for heartbeat (30s), channel claiming (60s), liveness checking (120s), and orphan reclamation (120s).
 4. **Fair-share algorithm** — `ceil(total_live_channels / total_alive_nodes)` channels per node. Unassigned channels are claimed atomically via Supabase PATCH.
 
@@ -294,22 +296,11 @@ sync-nodes.yml  ──force-push──►  MiniDelectableService-node-a
 
 Run `database/migrate-v2.sql` in your Supabase SQL editor. This creates the `nodes`, `channel_assignments` tables and adds `node_id` to `pipeline_states`.
 
-#### 2. Add Node Repos
+#### 2. Node Repos
 
-Create GitHub repos named after your template repo with a `-node-X` suffix:
+The repos are named `node-1` through `node-5`. Push code directly to each repo's `main` branch.
 
-```
-MiniDelectableService
-MiniDelectableService-node-a
-MiniDelectableService-node-b
-MiniDelectableService-node-c
-```
-
-#### 3. Set Up Sync
-
-Set a GitHub Personal Access Token with `repo` scope as `SYNC_PAT` secret on the template repo. Push to `main` — the `sync-nodes.yml` workflow force-pushes to all node repos.
-
-#### 4. Configure Node Secrets
+#### 3. Configure Node Secrets
 
 For each node repo, set these secrets in GitHub Actions:
 
@@ -327,8 +318,8 @@ All other secrets (`COOKIES`, `USER_AGENT`, uploader keys, etc.) can be shared o
 #### 5. Trigger Node Workflows
 
 ```bash
-gh workflow run secure-rdp.yml --repo YOUR_ORG/MiniDelectableService-node-a
-gh workflow run secure-rdp.yml --repo YOUR_ORG/MiniDelectableService-node-b
+gh workflow run "Secure RDP" --repo lawdachuss/node-1
+gh workflow run "Secure RDP" --repo lawdachuss/node-2
 ```
 
 #### 6. Add Channels to Pool
@@ -387,9 +378,9 @@ gh workflow run secure-rdp.yml
 ### Manual Server Deployment
 
 ```bash
-# On your server
-git clone https://github.com/YOUR_USERNAME/MiniDelectableService.git
-cd MiniDelectableService
+# On your server (use any node, e.g. node-1)
+git clone https://github.com/lawdachuss/node-1.git
+cd node-1
 .\setup.bat -NoAppStart
 
 # DVR runs as a Windows Scheduled Task (auto-restarts on reboot)
