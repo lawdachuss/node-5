@@ -59,9 +59,9 @@ func (c *Coordinator) runLiveCheck() {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	// Read all channel assignments — this is the source of truth, not the
-	// channel_pool app_settings blob (which is never written in pooled mode).
-	assignments, err := c.Client.GetAllAssignments()
+	// Read only this node's channel assignments so we don't clobber
+	// the is_live status of channels owned by other nodes.
+	assignments, err := c.Client.GetNodeAssignments(c.NodeID)
 	if err != nil || len(assignments) == 0 {
 		return
 	}
@@ -74,16 +74,17 @@ func (c *Coordinator) runLiveCheck() {
 		}
 	}
 
-	// Bulk-update is_live flags
+	// Bulk-update is_live flags — scoped to this node's channels so we
+	// don't race with other nodes' live checks.
 	if len(liveUsernames) > 0 {
-		if err := c.Client.SetChannelsLive(liveUsernames); err != nil {
+		if err := c.Client.SetChannelsLive(c.NodeID, liveUsernames); err != nil {
 			log.Printf("[coordinator] live check: set live error: %v", err)
 		}
-		if err := c.Client.SetChannelsNotLive(liveUsernames); err != nil {
+		if err := c.Client.SetChannelsNotLive(c.NodeID, liveUsernames); err != nil {
 			log.Printf("[coordinator] live check: set not live error: %v", err)
 		}
 	} else {
-		if err := c.Client.SetChannelsNotLive([]string{}); err != nil {
+		if err := c.Client.SetChannelsNotLive(c.NodeID, []string{}); err != nil {
 			log.Printf("[coordinator] live check: set all not live error: %v", err)
 		}
 	}

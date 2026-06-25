@@ -216,6 +216,7 @@ func New(c *cli.Context) (*entity.Config, error) {
 		ProxyURL:                c.String("proxy-url"),
 		ProxyUsername:           c.String("proxy-username"),
 		ProxyPassword:           c.String("proxy-password"),
+		ProxyRefreshURL:         c.String("proxy-refresh-url"),
 		OutputDir:               c.String("output-dir"),
 		PerModelFolder:          c.Bool("per-model-folder"),
 		DeleteLocalAfterUpload:  c.Bool("delete-local-after-upload"),

@@ -183,6 +183,12 @@ func main() {
 				Value:   "",
 			},
 			&cli.StringFlag{
+				Name:    "proxy-refresh-url",
+				Usage:   "URL to fetch fresh proxy list from when all proxies fail (returns JSON array or newline-separated URLs)",
+				EnvVars: []string{"PROXY_REFRESH_URL"},
+				Value:   "",
+			},
+			&cli.StringFlag{
 				Name:    "ffmpeg-path",
 				Usage:   "Path to ffmpeg executable (e.g. C:\\ffmpeg\\bin\\ffmpeg.exe). If not set, PATH is used.",
 				EnvVars: []string{"FFMPEG_PATH"},
@@ -382,6 +388,10 @@ func start(c *cli.Context) error {
 		warmupCancel()
 		fmt.Printf("[startup] TLS warmup completed in %v\n", time.Since(warmupT).Round(time.Millisecond))
 	}()
+
+	// Start background proxy refresher so the proxy list stays current.
+	// Uses PROXY_REFRESH_URL to fetch fresh proxies when all are exhausted.
+	go internal.StartProxyRefresher(context.Background())
 
 	server.Manager, err = manager.New()
 	if err != nil {

@@ -1149,35 +1149,35 @@ func (c *Client) CountMyAssignments(nodeID string) (int, error) {
 	return len(assignments), nil
 }
 
-// SetChannelsLive bulk-updates is_live=true for the given usernames.
-func (c *Client) SetChannelsLive(usernames []string) error {
+// SetChannelsLive bulk-updates is_live=true for the given usernames on this node.
+func (c *Client) SetChannelsLive(nodeID string, usernames []string) error {
 	if len(usernames) == 0 {
 		return nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	return c.patch(
-		fmt.Sprintf("/channel_assignments?username=in.(%s)&is_live=eq.false",
-			joinEscaped(usernames)),
+		fmt.Sprintf("/channel_assignments?username=in.(%s)&assigned_node=eq.%s&is_live=eq.false",
+			joinEscaped(usernames), url.QueryEscape(nodeID)),
 		map[string]interface{}{
 			"is_live":         true,
 			"live_checked_at": now,
 		})
 }
 
-// SetChannelsNotLive bulk-updates is_live=false for channels NOT in the given list.
-func (c *Client) SetChannelsNotLive(usernames []string) error {
+// SetChannelsNotLive bulk-updates is_live=false for this node's channels NOT in the given list.
+func (c *Client) SetChannelsNotLive(nodeID string, usernames []string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	if len(usernames) == 0 {
-		// Mark all as not live
-		return c.patch("/channel_assignments?is_live=eq.true",
+		// Mark all of this node's channels as not live
+		return c.patch(fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&is_live=eq.true", url.QueryEscape(nodeID)),
 			map[string]interface{}{
 				"is_live":         false,
 				"live_checked_at": now,
 			})
 	}
 	return c.patch(
-		fmt.Sprintf("/channel_assignments?username=not.in.(%s)&is_live=eq.true",
-			joinEscaped(usernames)),
+		fmt.Sprintf("/channel_assignments?username=not.in.(%s)&assigned_node=eq.%s&is_live=eq.true",
+			joinEscaped(usernames), url.QueryEscape(nodeID)),
 		map[string]interface{}{
 			"is_live":         false,
 			"live_checked_at": now,

@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,7 @@ type httpcloakTransport struct {
 	client    *httpcloak.Client
 	proxyURLs []string
 	proxyIdx  int
+	renewing  bool // prevents re-entrant refreshProxies calls from RoundTrip recursion
 }
 
 // sharedTransportSingleton is a singleton http.RoundTripper for the shared transport.
@@ -314,7 +316,11 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 
 	// Try up to len(proxyURLs) attempts, rotating proxy on connection failures.
-	for attempt := 0; attempt < max(1, len(t.proxyURLs)); attempt++ {
+	t.mu.Lock()
+	proxyCount := len(t.proxyURLs)
+	t.mu.Unlock()
+
+	for attempt := 0; attempt < max(1, proxyCount); attempt++ {
 		t.mu.Lock()
 		client := t.client
 		t.mu.Unlock()
@@ -362,7 +368,148 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, err
 	}
 
+	// All SOCKS5 proxies failed — try to refresh the proxy list before giving up.
+	// The renewing flag prevents re-entrant calls that would cause infinite recursion
+	// when the refreshed proxy list contains the same (still-failing) proxies.
+	t.mu.Lock()
+	alreadyRenewing := t.renewing
+	if !alreadyRenewing {
+		t.renewing = true
+	}
+	t.mu.Unlock()
+
+	if !alreadyRenewing {
+		if refreshed := t.refreshProxies(); refreshed {
+			t.mu.Lock()
+			t.renewing = false
+			t.mu.Unlock()
+			// Retry with the new proxy list
+			return t.RoundTrip(req)
+		}
+		t.mu.Lock()
+		t.renewing = false
+		t.mu.Unlock()
+	}
 	return nil, fmt.Errorf("all proxies failed")
+}
+
+// refreshProxies fetches fresh proxy URLs from the configured refresh URL
+// and updates the transport's proxy list. Uses direct connection (no proxy)
+// to avoid circular dependency. Returns true if new proxies were loaded.
+func (t *httpcloakTransport) refreshProxies() bool {
+	if server.Config == nil || server.Config.ProxyRefreshURL == "" {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", server.Config.ProxyRefreshURL, nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || len(body) == 0 {
+		return false
+	}
+
+	var newProxies []string
+
+	// Try JSON array first: ["socks5://ip:port", ...]
+	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("[")) {
+		var parsed []string
+		if err := json.Unmarshal(body, &parsed); err == nil && len(parsed) > 0 {
+			newProxies = parsed
+		}
+	}
+
+	// Fall back to newline-separated URLs (also handles comma-separated)
+	if len(newProxies) == 0 {
+		text := strings.TrimSpace(string(body))
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			// Support comma-separated on a single line
+			for _, part := range strings.Split(line, ",") {
+				part = strings.TrimSpace(part)
+				if part != "" {
+					newProxies = append(newProxies, part)
+				}
+			}
+		}
+	}
+
+	if len(newProxies) == 0 {
+		return false
+	}
+
+	// Apply proxy auth credentials if configured
+	username := strings.TrimSpace(server.Config.ProxyUsername)
+	password := strings.TrimSpace(server.Config.ProxyPassword)
+	for i, p := range newProxies {
+		newProxies[i] = applyProxyAuth(p, username, password)
+	}
+
+	// Update the transport with the new proxy list
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.proxyURLs = newProxies
+	t.proxyIdx = 0
+	if len(newProxies) > 0 {
+		if c, ok := interface{}(t.client).(interface{ Close() error }); ok {
+			c.Close()
+		}
+		t.client = newCloakClient(newProxies[0])
+	}
+
+	return true
+}
+
+// StartProxyRefresher periodically fetches fresh proxies in the background.
+// Runs every refreshInterval (default 10 minutes) until ctx is cancelled.
+func StartProxyRefresher(ctx context.Context) {
+	interval := 10 * time.Minute
+	if server.Config != nil && server.Config.ProxyRefreshInterval > 0 {
+		interval = server.Config.ProxyRefreshInterval
+	}
+
+	t, ok := getSharedTransport().(*httpcloakTransport)
+	if !ok {
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Do an initial refresh on startup
+	if server.Config != nil && server.Config.ProxyRefreshURL != "" {
+		if t.refreshProxies() {
+			fmt.Println("[proxy] refreshed proxy list on startup")
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if server.Config != nil && server.Config.ProxyRefreshURL != "" {
+				if t.refreshProxies() {
+					fmt.Println("[proxy] refreshed proxy list")
+				}
+			}
+		}
+	}
 }
 
 // max returns the larger of a and b.

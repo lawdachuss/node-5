@@ -30,6 +30,10 @@ func (m *mockChannelManager) RemoveChannelForReassignment(username string) error
 	return nil
 }
 
+func (m *mockChannelManager) LocalChannelUsernames() []string {
+	return nil
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

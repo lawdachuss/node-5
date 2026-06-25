@@ -159,9 +159,11 @@ type Config struct {
 	CfClearance   string
 	UserAgent     string
 	Domain        string
-	ProxyURL      string
-	ProxyUsername string
-	ProxyPassword string
+	ProxyURL             string
+	ProxyUsername        string
+	ProxyPassword        string
+	ProxyRefreshURL      string        // URL to fetch fresh proxies from when all fail
+	ProxyRefreshInterval time.Duration // how often to auto-refresh proxies (0 = disabled)
 
 	OutputDir               string
 	PerModelFolder          bool

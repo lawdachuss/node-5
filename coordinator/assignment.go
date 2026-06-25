@@ -80,6 +80,14 @@ func (c *Coordinator) runClaimCycle() {
 		log.Printf("[coordinator] repaired %d orphaned assignment(s) (assigned_node set but status=unassigned)", repaired)
 	}
 
+	// Reconcile: stop any locally-running channels that are no longer assigned
+	// to this node in the database. This prevents duplicate recording when
+	// another node's reaper reclaimed our channels (e.g. after a heartbeat
+	// gap) but we are still recording locally.
+	if c.Manager != nil {
+		c.reconcileLocalChannels()
+	}
+
 	stats, err := c.Client.GetAssignmentStats()
 	if err != nil {
 		log.Printf("[coordinator] claim cycle: get stats error: %v", err)
@@ -146,6 +154,39 @@ func (c *Coordinator) runClaimCycle() {
 						log.Printf("[coordinator] error creating channel from assignment %s: %v", ca.Username, err)
 					}
 				}
+			}
+		}
+	}
+}
+
+// reconcileLocalChannels stops channels running locally that are no longer
+// assigned to this node in the database. This prevents duplicate recording
+// when another node's reaper reclaimed our channels (e.g. after a heartbeat
+// gap) but we are still recording locally.
+func (c *Coordinator) reconcileLocalChannels() {
+	if c.Client == nil || c.Manager == nil {
+		return
+	}
+
+	dbAssignments, err := c.Client.GetNodeAssignments(c.NodeID)
+	if err != nil {
+		log.Printf("[coordinator] reconcile: get assignments error: %v", err)
+		return
+	}
+
+	assigned := make(map[string]bool, len(dbAssignments))
+	for _, a := range dbAssignments {
+		if a.Status != "unassigned" && a.AssignedNode != "" {
+			assigned[a.Username] = true
+		}
+	}
+
+	localUsernames := c.Manager.LocalChannelUsernames()
+	for _, username := range localUsernames {
+		if !assigned[username] {
+			log.Printf("[coordinator] reconcile: channel %q no longer assigned to this node — stopping local recording", username)
+			if err := c.Manager.RemoveChannelForReassignment(username); err != nil {
+				log.Printf("[coordinator] reconcile: error stopping %s: %v", username, err)
 			}
 		}
 	}
