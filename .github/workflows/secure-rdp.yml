@@ -72,13 +72,13 @@ jobs:
           }
           
           if ($hasActiveOverlap) {
-            $eventName = "$env:GITHUB_EVENT_NAME"
+            $eventName = [Environment]::GetEnvironmentVariable("GITHUB_EVENT_NAME")
             if ($eventName -eq "push") {
-              Write-Host "Push event — cancelling OLD active run and letting this one proceed (latest code)."
+              Write-Host "Push event - cancelling old runs and proceeding with latest code."
               foreach ($run in $runs) {
                 if ($run.databaseId -ne $currentRunId -and $run.status -ne 'completed') {
                   Write-Host "  Cancelling old run ID=$($run.databaseId) (Status=$($run.status))"
-                  gh run cancel $run.databaseId --repo "$env:GITHUB_REPOSITORY" 2>$null
+                  gh run cancel $run.databaseId --repo "$env:GITHUB_REPOSITORY"
                 }
               }
               Write-Host "Proceeding with push-triggered deployment."
