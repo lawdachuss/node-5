@@ -1,0 +1,24 @@
+name: Sync Nodes
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync to all node repos
+        env:
+          SYNC_PAT: ${{ secrets.SYNC_PAT }}
+        run: |
+          for repo in lawdachuss/node-2 lawdachuss/node-3 lawdachuss/node-4 lawdachuss/node-5; do
+            echo "Syncing to $repo..."
+            git remote add "$repo" "https://x-access-token:${SYNC_PAT}@github.com/${repo}.git"
+            git push --force "$repo" main
+          done
