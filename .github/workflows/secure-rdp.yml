@@ -386,9 +386,15 @@ jobs:
 
       - name: Refresh Chaturbate Cookies via Scrapling
         shell: powershell
+        env:
+          MINI_ENV: ${{ secrets.env }}
         run: |
           $repoDir = $env:REPO_DIR
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found"; exit 1 }
+          if (-not [string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
+            [System.IO.File]::WriteAllText("$repoDir\.env", $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host "[OK] Wrote .env for cookie refresher"
+          }
           $skipRefresh = $false
           # Install PySocks so pip can handle ALL_PROXY=socks5:// natively
           Write-Host "Installing PySocks (needed for pip SOCKS5 support)..."
