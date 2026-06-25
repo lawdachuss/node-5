@@ -386,15 +386,9 @@ jobs:
 
       - name: Refresh Chaturbate Cookies via Scrapling
         shell: powershell
-        env:
-          MINI_ENV: ${{ secrets.env }}
         run: |
           $repoDir = $env:REPO_DIR
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found"; exit 1 }
-          if (-not [string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
-            [System.IO.File]::WriteAllText("$repoDir\.env", $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
-            Write-Host "[OK] Wrote .env for cookie refresher"
-          }
           $skipRefresh = $false
           # Install PySocks so pip can handle ALL_PROXY=socks5:// natively
           Write-Host "Installing PySocks (needed for pip SOCKS5 support)..."
@@ -427,13 +421,8 @@ jobs:
               Write-Host "--- STDERR ---"
               $refresherErrors | ForEach-Object { Write-Host $_ }
             }
-            $uaLine = $refresherOutput | Where-Object { $_ -match '^UA_EXTRACTED=(.+)' }
-            if ($uaLine -and $uaLine -match '^UA_EXTRACTED=(.+)') {
-              $ua = $matches[1]
-              Write-Host "[OK] Extracted User-Agent: $ua"
-              $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-              echo "USER_AGENT=$ua" >> $env:GITHUB_ENV
-            }
+            $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+            echo "USER_AGENT=$ua" >> $env:GITHUB_ENV
             Write-Host "[OK] Cookie refresh step completed"
           }
 
