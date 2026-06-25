@@ -1,0 +1,31 @@
+name: Sync Nodes
+
+concurrency:
+  group: sync-nodes
+  cancel-in-progress: false
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  sync:
+    if: github.repository == 'lawdachuss/node-1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync to all node repos
+        env:
+          SYNC_PAT: ${{ secrets.SYNC_PAT }}
+        run: |
+          set -e
+          git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+          for repo in lawdachuss/node-2 lawdachuss/node-3 lawdachuss/node-4 lawdachuss/node-5; do
+            echo "=== Syncing to $repo ==="
+            git push --force "https://${SYNC_PAT}@github.com/${repo}.git" main
+            echo "[OK] $repo synced"
+          done
+          echo "All nodes synced successfully."
