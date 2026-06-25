@@ -14,6 +14,7 @@ jobs:
           fetch-depth: 0
 
       - name: Sync to all node repos
+        if: github.repository == 'lawdachuss/node-1'
         env:
           SYNC_PAT: ${{ secrets.SYNC_PAT }}
         run: |
