@@ -1,6 +1,9 @@
 name: Secure RDP
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
@@ -20,6 +23,14 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
+
+      - name: Compute REPO_DIR from repo name
+        shell: powershell
+        run: |
+          $repoName = ($env:GITHUB_REPOSITORY -split '/')[1]
+          echo "REPO_DIR=D:\repos\$repoName" >> $env:GITHUB_ENV
+          echo "REPO_NAME=$repoName" >> $env:GITHUB_ENV
+          Write-Host "GITHUB_REPOSITORY=$env:GITHUB_REPOSITORY → REPO_DIR=D:\repos\$repoName"
 
       - name: Record Start Time and Enforce Timing Rules
         shell: powershell
@@ -287,7 +298,7 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTH_KEY)) {
             Write-Error "TAILSCALE_AUTH_KEY secret is EMPTY or NOT SET"
-            Write-Host "Go to: https://github.com/lawdachuss/rdp-goondvr/settings/secrets/actions"
+            Write-Host "Go to: https://github.com/$env:GITHUB_REPOSITORY/settings/secrets/actions"
             exit 1
           }
           Write-Host "[OK] TAILSCALE_AUTH_KEY is set (length: $($env:TAILSCALE_AUTH_KEY.Length))"
@@ -362,10 +373,10 @@ jobs:
           if (-not $success) { Write-Error "RDP port 3389 not reachable on $env:TAILSCALE_IP after 100s"; exit 1 }
           Write-Host "[OK] RDP reachable via Tailscale."
 
-      - name: Clone node-3 to D:\
+      - name: Clone repo to D:\
         shell: powershell
         run: |
-          $repoDir = "D:\repos\node-3"
+          $repoDir = $env:REPO_DIR
           New-Item -ItemType Directory -Force -Path "D:\repos" | Out-Null
           if (Test-Path $repoDir) { Remove-Item -Recurse -Force $repoDir }
           Write-Host "Using checked-out repo code (commit: $(git rev-parse --short HEAD))..."
@@ -381,7 +392,7 @@ jobs:
         env:
           MINI_ENV: ${{ secrets.env }}
         run: |
-          $repoDir = "D:\repos\node-3"
+          $repoDir = $env:REPO_DIR
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found"; exit 1 }
           if (-not [string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
             [System.IO.File]::WriteAllText("$repoDir\.env", $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
@@ -434,7 +445,7 @@ jobs:
         env:
           MINI_ENV: ${{ secrets.env }}
         run: |
-          $repoDir = "D:\repos\node-3"
+          $repoDir = $env:REPO_DIR
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found"; exit 1 }
 
           if ([string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
@@ -839,7 +850,7 @@ jobs:
           CHANNEL_POOL_MODE: ${{ secrets.CHANNEL_POOL_MODE }}
           NODE_ID: ${{ secrets.NODE_ID }}
         run: |
-          $repoDir = "D:\repos\node-3"
+          $repoDir = $env:REPO_DIR
           $dvrExe = "$repoDir\chaturbate-dvr.exe"
           $videosDir = "D:\videos"
           $cloudflaredPath = "$repoDir\cloudflared.exe"
