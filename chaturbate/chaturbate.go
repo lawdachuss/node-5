@@ -225,7 +225,12 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 	// Enrich metadata from the GET API (chatvideocontext) which reliably
 	// returns tags, room_title, num_users, and broadcaster_gender even when
 	// the POST endpoint only returns the HLS URL.
-	if getResp, getErr := fetchAPIResponse(ctx, client, username); getErr == nil {
+	// Keep the response around so we can use it as a fallback if the POST
+	// API returned stale offline/away status but the GET says the streamer
+	// is actually live.
+	var getResp *APIResponse
+	if gr, getErr := fetchAPIResponse(ctx, client, username); getErr == nil {
+		getResp = gr
 		if roomInfo != nil {
 			if getResp.RoomTitle != "" {
 				roomInfo.RoomTitle = getResp.RoomTitle
@@ -249,6 +254,32 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 	case StatusPrivate:
 		return nil, resp.RoomStatus, internal.ErrPrivateStream
 	case StatusAway, StatusOffline:
+		// POST API says offline/away — but the GET API may have fresher
+		// data.  The POST endpoint can return stale room_status due to
+		// CDN edge caching or CSRF-token expiry, causing live streamers
+		// to be skipped indefinitely.  If GET says the streamer is public
+		// and provides a stream URL, trust GET.
+		if getResp != nil && getResp.RoomStatus == StatusPublic {
+			if getResp.StreamURL() != "" {
+				fmt.Printf("[WARN] %s: POST said %s but GET says public — trusting GET (check CSRF cookies if this persists)\n", username, resp.RoomStatus)
+				resp = *getResp
+				if roomInfo != nil {
+					if getResp.RoomTitle != "" {
+						roomInfo.RoomTitle = getResp.RoomTitle
+					}
+					if len(getResp.Tags) > 0 {
+						roomInfo.Tags = getResp.Tags
+					}
+					if getResp.NumUsers > 0 {
+						roomInfo.NumUsers = getResp.NumUsers
+					}
+					if getResp.BroadcasterGender != "" {
+						roomInfo.BroadcasterGender = getResp.BroadcasterGender
+					}
+				}
+				break // fall through to stream URL validation
+			}
+		}
 		return nil, resp.RoomStatus, internal.ErrChannelOffline
 	}
 
