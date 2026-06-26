@@ -489,6 +489,13 @@ func (t *httpcloakTransport) fetchProxiesFrom(refreshURL string) bool {
 		return false
 	}
 
+	// Normalize: prepend socks5:// to bare ip:port entries
+	for i, p := range newProxies {
+		if !strings.Contains(p, "://") {
+			newProxies[i] = "socks5://" + p
+		}
+	}
+
 	// Apply proxy auth credentials if configured
 	username := strings.TrimSpace(server.Config.ProxyUsername)
 	password := strings.TrimSpace(server.Config.ProxyPassword)
