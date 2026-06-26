@@ -733,7 +733,10 @@ func (m *Manager) sessionLoop(d time.Duration) {
 	if channels == 0 {
 		m.sessionDeadlineMu.Lock()
 		m.sessionDeadline = time.Time{}
-		m.sessionDuration = 0
+		// Keep sessionDuration = d so that when channels arrive later
+		// via CreateChannelFromAssignment, StartSession(d) will work
+		// instead of being a no-op with duration 0.
+		m.sessionDuration = d
 		m.sessionDeadlineMu.Unlock()
 		log.Println("[session] no channels to record — stopping session loop")
 		m.sessionMu.Lock()

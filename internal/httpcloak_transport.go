@@ -16,6 +16,25 @@ import (
 	"github.com/teacat/chaturbate-dvr/server"
 )
 
+// defaultProxyRefreshURLs are built-in sources for free SOCKS5 proxies.
+// Used when no explicit PROXY_REFRESH_URL is configured.
+//
+// Region selection avoids countries where Chaturbate enforces age/face ID
+// verification. As of 2026, these include 26 US states (TX, LA, UT, VA, FL,
+// NC, etc.), France, Germany, Italy, the UK, and Australia. Safe regions
+// include Netherlands (NL), Canada (CA), India (IN), and most of Asia/SA.
+//
+// Priority:
+//  1. NL + CA + IN — proven safe, no age verification required
+//  2. All-region fallback — broader pool; age verification is detected at
+//     the HTTP response level (ErrAgeVerification) regardless of proxy region
+//
+// Sources: ProxyScrape free proxy lists.
+var defaultProxyRefreshURLs = []string{
+	"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl,ca,in",
+	"https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/socks5/data.txt",
+}
+
 // httpcloakTransport wraps httpcloak.Client as an http.RoundTripper.
 // It emulates a Chrome 146 TLS/HTTP2 fingerprint to bypass Cloudflare WAF
 // TCP RST that Go's default crypto/tls triggers.
@@ -394,17 +413,35 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 // refreshProxies fetches fresh proxy URLs from the configured refresh URL
-// and updates the transport's proxy list. Uses direct connection (no proxy)
-// to avoid circular dependency. Returns true if new proxies were loaded.
+// (or built-in defaults) and updates the transport's proxy list.
+// Uses direct connection (no proxy) to avoid circular dependency.
+// Returns true if new proxies were loaded.
 func (t *httpcloakTransport) refreshProxies() bool {
-	if server.Config == nil || server.Config.ProxyRefreshURL == "" {
+	if server.Config == nil {
 		return false
 	}
 
+	refreshURLs := defaultProxyRefreshURLs
+	if server.Config.ProxyRefreshURL != "" {
+		refreshURLs = []string{server.Config.ProxyRefreshURL}
+	}
+
+	for _, url := range refreshURLs {
+		if t.fetchProxiesFrom(url) {
+			fmt.Printf("[proxy] loaded %d proxies from %s\n", len(t.proxyURLs), url)
+			return true
+		}
+	}
+	return false
+}
+
+// fetchProxiesFrom fetches proxy URLs from a single refresh endpoint and
+// updates the transport if any are found. Returns true on success.
+func (t *httpcloakTransport) fetchProxiesFrom(refreshURL string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", server.Config.ProxyRefreshURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", refreshURL, nil)
 	if err != nil {
 		return false
 	}
@@ -477,6 +514,8 @@ func (t *httpcloakTransport) refreshProxies() bool {
 
 // StartProxyRefresher periodically fetches fresh proxies in the background.
 // Runs every refreshInterval (default 10 minutes) until ctx is cancelled.
+// When no explicit PROXY_REFRESH_URL is configured, uses built-in default
+// sources (ProxyScrape free SOCKS5 lists for NL + IN).
 func StartProxyRefresher(ctx context.Context) {
 	interval := 10 * time.Minute
 	if server.Config != nil && server.Config.ProxyRefreshInterval > 0 {
@@ -492,10 +531,8 @@ func StartProxyRefresher(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Do an initial refresh on startup
-	if server.Config != nil && server.Config.ProxyRefreshURL != "" {
-		if t.refreshProxies() {
-			fmt.Println("[proxy] refreshed proxy list on startup")
-		}
+	if t.refreshProxies() {
+		fmt.Println("[proxy] refreshed proxy list on startup")
 	}
 
 	for {
@@ -503,10 +540,8 @@ func StartProxyRefresher(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if server.Config != nil && server.Config.ProxyRefreshURL != "" {
-				if t.refreshProxies() {
-					fmt.Println("[proxy] refreshed proxy list")
-				}
+			if t.refreshProxies() {
+				fmt.Println("[proxy] refreshed proxy list")
 			}
 		}
 	}
