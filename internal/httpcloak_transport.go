@@ -243,7 +243,9 @@ var cdnHostSuffixes = []string{
 }
 
 // proxyBypassHosts lists hosts that should never use the proxy.
-// Stripchat doesn't need a Netherlands proxy — it has no age verification.
+// Stripchat doesn't need a proxy — it has no age verification or
+// datacenter-IP blocking like Chaturbate does from GitHub Actions runners.
+// Only Chaturbate API requests need the SOCKS5 proxy (NL/IN region bypass).
 var proxyBypassHosts = []string{
 	"stripchat.com",
 	".stripchat.com",
