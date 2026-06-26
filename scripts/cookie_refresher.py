@@ -96,11 +96,47 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
 
     print("  Trying curl_cffi (browser TLS impersonation)...")
 
-    impersonate = "chrome124"
+    # Try the latest Chrome versions that curl_cffi supports.
+    # Must match httpcloak's "chrome-146-windows" fingerprint as closely as
+    # possible so cf_clearance works with the DVR's TLS transport.
+    CHROME_VERSIONS = ["chrome131", "chrome130", "chrome128", "chrome126", "chrome124"]
     session_cookies = {}
 
-    proxies = None
-    if proxy:
+    for impersonate in CHROME_VERSIONS:
+        print(f"  Trying {impersonate}...")
+        try:
+            resp = cffi_requests.get(
+                "https://chaturbate.com",
+                impersonate=impersonate,
+                timeout=60,
+                proxies=proxies,
+                headers={"User-Agent": user_agent} if user_agent else None,
+                allow_redirects=True,
+            )
+            print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
+            if resp.status_code == 200:
+                print(f"  [OK] {impersonate} succeeded")
+                break
+            else:
+                print(f"  {impersonate} returned {resp.status_code}, trying next...")
+                continue
+        except Exception as e:
+            err_msg = str(e)
+            if "not supported" in err_msg.lower() or "unknown" in err_msg.lower():
+                print(f"  {impersonate} not supported by this curl_cffi version, trying next...")
+                continue
+            print(f"  [WARN] {impersonate} failed: {e}")
+            # Only try next version for "not supported" errors
+            if "not supported" in err_msg.lower() or "unknown" in err_msg.lower():
+                continue
+            # Other errors (network, timeout) — stop trying
+            break
+    else:
+        print("  [WARN] No supported Chrome impersonation version found")
+        return {}
+
+    # Extract cookies from the response
+    if hasattr(resp, "cookies"):
         # curl_cffi uses socks5h:// for DNS resolution through proxy
         if proxy.startswith("socks5://"):
             proxy_h = proxy.replace("socks5://", "socks5h://", 1)

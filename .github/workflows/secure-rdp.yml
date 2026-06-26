@@ -440,21 +440,21 @@ jobs:
           $repoDir = $env:REPO_DIR
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found"; exit 1 }
 
-          if ([string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
-            Write-Warning "Secret 'env' is empty - skipping .env file"
-          } else {
-            # Write .env to repo directory
-            [System.IO.File]::WriteAllText("$repoDir\.env", $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
-            Write-Host "[OK] Wrote .env file to $repoDir\.env"
-            
-            # Verify .env was written
-            if (Test-Path "$repoDir\.env") {
-              $envSize = (Get-Item "$repoDir\.env").Length
-              Write-Host "[OK] Verified .env exists ($envSize bytes)"
-            } else {
-              Write-Error ".env file was not created"
+          # .env is already written by the "Refresh Chaturbate Cookies" step.
+          # The cookie refresher updated it with fresh Chrome-146-bound cookies.
+          # DO NOT overwrite it with MINI_ENV here — that would destroy the
+          # refreshed cookies and cause Cloudflare TLS fingerprint mismatches.
+          if (-not (Test-Path "$repoDir\.env")) {
+            if ([string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
+              Write-Error "No .env file and MINI_ENV secret is empty"
               exit 1
             }
+            # Fallback: write .env from secret (should not happen normally)
+            [System.IO.File]::WriteAllText("$repoDir\.env", $env:MINI_ENV, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host "[WARN] Wrote .env from MINI_ENV secret (cookie refresher did not run)"
+          } else {
+            $envSize = (Get-Item "$repoDir\.env").Length
+            Write-Host "[OK] .env already exists from cookie refresher ($envSize bytes) — preserving refreshed cookies"
           }
 
           Set-Location $repoDir
