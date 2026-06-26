@@ -1498,7 +1498,7 @@ func AddToPool(c *gin.Context) {
 		req.Site = "chaturbate"
 	}
 	if req.Resolution == 0 {
-		req.Resolution = 1440
+		req.Resolution = 2160
 	}
 	if req.Framerate == 0 {
 		req.Framerate = 60
