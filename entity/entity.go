@@ -195,3 +195,34 @@ type Config struct {
 	NodeID          string // unique node identifier (auto-detected if empty)
 	ChannelPoolMode string // "isolated" (default) or "pooled"
 }
+
+// ProxyStatus holds current proxy pool state for the admin page.
+type ProxyStatus struct {
+	PoolSize        int      `json:"pool_size"`
+	CurrentIndex    int      `json:"current_index"`
+	RefreshURLs     []string `json:"refresh_urls"`
+	LastRefreshTime string   `json:"last_refresh_time"`
+	ConfigURL       string   `json:"config_url"`
+}
+
+// SessionEntry represents a completed recording session for the admin page.
+type SessionEntry struct {
+	StartedAt        string `json:"started_at"`
+	Duration         string `json:"duration"`
+	ChannelsCount    int    `json:"channels_count"`
+	TotalRecordings  int    `json:"total_recordings"`
+	TotalUploads     int    `json:"total_uploads"`
+	ChannelsRecorded string `json:"channels_recorded"` // comma-separated
+	CompletedAt      string `json:"completed_at"`
+}
+
+// QualitySummary holds per-channel recording quality stats for the admin page.
+type QualitySummary struct {
+	Username    string  `json:"username"`
+	Site        string  `json:"site"`
+	Recordings  int     `json:"recordings"`
+	AvgDuration float64 `json:"avg_duration_sec"`
+	AvgViewers  int     `json:"avg_viewers"`
+	Resolutions []string `json:"resolutions"`
+	TotalSize   int64   `json:"total_size_bytes"`
+}

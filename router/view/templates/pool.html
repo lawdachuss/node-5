@@ -117,6 +117,12 @@
             cursor: pointer;
         }
         .add-form button:hover { opacity: 0.85; }
+        .input-wrap { position: relative; display: inline-flex; align-items: center; }
+        .input-wrap input { padding-right: 24px; }
+        .input-status { position: absolute; right: 6px; font-size: 14px; line-height: 1; pointer-events: none; }
+        .input-status.ok { color: #22c55e; }
+        .input-status.dup { color: #ef4444; }
+        .input-status.checking { color: var(--text-muted); }
     </style>
 </head>
 <body>
@@ -138,7 +144,10 @@
             <option value="chaturbate">Chaturbate</option>
             <option value="stripchat">Stripchat</option>
         </select>
-        <input type="text" id="pool-username" placeholder="Username" />
+        <span class="input-wrap">
+            <input type="text" id="pool-username" placeholder="Username" onkeyup="checkPoolExists()" autocomplete="off" />
+            <span id="pool-status" class="input-status"></span>
+        </span>
         <select id="pool-resolution">
             <option value="2160">4K — 2160p</option>
             <option value="1440" selected>2K — 1440p</option>
@@ -216,6 +225,33 @@
 </div>
 
 <script>
+var checkTimer = null;
+function checkPoolExists() {
+    clearTimeout(checkTimer);
+    var username = document.getElementById('pool-username').value.trim();
+    var statusEl = document.getElementById('pool-status');
+    if (!username) { statusEl.className = 'input-status'; statusEl.textContent = ''; return; }
+    statusEl.className = 'input-status checking';
+    statusEl.textContent = '⋯';
+    checkTimer = setTimeout(function() {
+        var site = document.getElementById('pool-site').value;
+        fetch('/api/pool/check?username=' + encodeURIComponent(username) + '&site=' + encodeURIComponent(site))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.exists) {
+                statusEl.className = 'input-status dup';
+                statusEl.textContent = '✕';
+            } else {
+                statusEl.className = 'input-status ok';
+                statusEl.textContent = '✓';
+            }
+        }).catch(function() {
+            statusEl.className = 'input-status';
+            statusEl.textContent = '';
+        });
+    }, 400);
+}
+
 function addToPool() {
     var site = document.getElementById('pool-site').value;
     var username = document.getElementById('pool-username').value.trim();

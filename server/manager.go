@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/teacat/chaturbate-dvr/database"
 	"github.com/teacat/chaturbate-dvr/entity"
 )
 
@@ -31,4 +32,8 @@ type IManager interface {
 	SessionInfo() (time.Duration, bool)
 	TriggerSessionStop()
 	UploadEntries() *entity.UploadsResponse
+	SessionHistory() []entity.SessionEntry
+	AdminEventSubscriber(w http.ResponseWriter, r *http.Request)
+	PublishAdminEvent(eventType string, data []byte)
+	QualitySummaries(recordings []database.Recording) []entity.QualitySummary
 }

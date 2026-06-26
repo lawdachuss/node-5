@@ -106,6 +106,13 @@ type Manager struct {
 	// StartSession is called more than once (e.g. from create-channel handler).
 	sessionMu      sync.Mutex
 	sessionStarted bool
+
+	// sessionHistory keeps an in-memory log of completed sessions for the admin page.
+	sessionHistory   []entity.SessionEntry
+	sessionHistoryMu sync.Mutex
+	// Track current session metadata for the admin page
+	sessionStartTime time.Time
+	sessionChannels  int
 }
 
 // TriggerSessionStop signals the session loop to stop recording now and
@@ -145,6 +152,9 @@ func New() (*Manager, error) {
 
 	updateStream := server.CreateStream("updates")
 	updateStream.AutoReplay = false
+
+	adminStream := server.CreateStream("admin")
+	adminStream.AutoReplay = false
 
 	return &Manager{
 		SSE:          server,
@@ -746,6 +756,11 @@ func (m *Manager) sessionLoop(d time.Duration) {
 	}
 	log.Printf("[session] recording session started — next stop in %s with %d channel(s)", d, channels)
 
+	// Track session start for history
+	m.sessionStartTime = time.Now()
+	m.sessionChannels = channels
+	m.publishSessionEvent("session_started", fmt.Sprintf("Session started: %s with %d channel(s)", d, channels))
+
 	deadline := time.Now().Add(d)
 	m.sessionDeadlineMu.Lock()
 	m.sessionDeadline = deadline
@@ -796,6 +811,9 @@ sessionWait:
 
 	log.Println("[session] all processing complete — session ended")
 
+	// Record session history
+	m.recordSessionEntry()
+
 	// Signal workflow that all uploads are done so it can safely exit.
 	if err := os.WriteFile("upload-complete.flag", []byte("done"), 0644); err != nil {
 		log.Printf("[session] WARNING: could not write upload-complete.flag: %v", err)
@@ -810,6 +828,58 @@ sessionWait:
 	m.ResumeAllChannels()
 	m.StartWatcher()
 	m.sessionLoop(d)
+}
+
+// recordSessionEntry saves the completed session to the in-memory history.
+func (m *Manager) recordSessionEntry() {
+	m.sessionHistoryMu.Lock()
+	defer m.sessionHistoryMu.Unlock()
+
+	started := m.sessionStartTime
+	duration := time.Since(started)
+
+	// Collect channel names and count recordings/uploads
+	chs := m.ChannelInfo()
+	names := make([]string, 0, len(chs))
+	totalRecs := 0
+	totalUploads := 0
+	for _, ch := range chs {
+		names = append(names, ch.Username)
+		if ch.Filename != "" {
+			totalRecs++
+		}
+		if ch.UploadStatus != "" {
+			totalUploads++
+		}
+	}
+
+	entry := entity.SessionEntry{
+		StartedAt:        started.Format(time.RFC3339),
+		Duration:         duration.Round(time.Second).String(),
+		ChannelsCount:    len(chs),
+		TotalRecordings:  totalRecs,
+		TotalUploads:     totalUploads,
+		ChannelsRecorded: strings.Join(names, ", "),
+		CompletedAt:      time.Now().Format(time.RFC3339),
+	}
+
+	m.sessionHistory = append(m.sessionHistory, entry)
+	// Keep last 50
+	if len(m.sessionHistory) > 50 {
+		m.sessionHistory = m.sessionHistory[len(m.sessionHistory)-50:]
+	}
+
+	m.publishSessionEvent("session_completed", fmt.Sprintf("Session completed: %s, %d recordings", entry.Duration, totalRecs))
+}
+
+// publishSessionEvent publishes an admin SSE event for session state changes.
+func (m *Manager) publishSessionEvent(eventType, message string) {
+	data, _ := json.Marshal(map[string]string{
+		"type":    eventType,
+		"message": message,
+		"time":    time.Now().Format(time.RFC3339),
+	})
+	m.PublishAdminEvent("session", data)
 }
 
 // IsFileUploadInFlight returns true if the given file path is currently
@@ -1010,4 +1080,88 @@ func (m *Manager) UploadEntries() *entity.UploadsResponse {
 // Subscriber handles SSE subscriptions for the specified channel.
 func (m *Manager) Subscriber(w http.ResponseWriter, r *http.Request) {
 	m.SSE.ServeHTTP(w, r)
+}
+
+// PublishAdminEvent publishes an event to the admin event stream.
+func (m *Manager) PublishAdminEvent(eventType string, data []byte) {
+	m.SSE.Publish("admin", &sse.Event{
+		Event: []byte(eventType),
+		Data:  data,
+	})
+}
+
+// AdminEventSubscriber handles SSE subscriptions for the admin event stream.
+func (m *Manager) AdminEventSubscriber(w http.ResponseWriter, r *http.Request) {
+	m.SSE.ServeHTTP(w, r)
+}
+
+// SessionHistory returns the in-memory session history (up to 50 entries).
+func (m *Manager) SessionHistory() []entity.SessionEntry {
+	m.sessionHistoryMu.Lock()
+	defer m.sessionHistoryMu.Unlock()
+	// Return a copy
+	entries := make([]entity.SessionEntry, len(m.sessionHistory))
+	copy(entries, m.sessionHistory)
+	return entries
+}
+
+// QualitySummaries aggregates recording quality stats from a recordings list.
+func (m *Manager) QualitySummaries(recordings []database.Recording) []entity.QualitySummary {
+	type acc struct {
+		count       int
+		totalDur    float64
+		totalSize   int64
+		viewers     int
+		resolutions map[string]bool
+		site        string
+	}
+	byUser := make(map[string]*acc)
+	for i := range recordings {
+		r := &recordings[i]
+		a, ok := byUser[r.Username]
+		if !ok {
+			a = &acc{resolutions: make(map[string]bool)}
+			byUser[r.Username] = a
+		}
+		a.count++
+		a.totalDur += r.Duration
+		a.totalSize += r.Filesize
+		a.viewers += r.Viewers
+		if r.Resolution != "" {
+			a.resolutions[r.Resolution] = true
+		}
+		if r.Username != "" && a.site == "" {
+			a.site = "chaturbate"
+		}
+	}
+
+	result := make([]entity.QualitySummary, 0, len(byUser))
+	for username, a := range byUser {
+		res := make([]string, 0, len(a.resolutions))
+		for r := range a.resolutions {
+			res = append(res, r)
+		}
+		sort.Strings(res)
+		avgDur := 0.0
+		if a.count > 0 {
+			avgDur = a.totalDur / float64(a.count)
+		}
+		avgView := 0
+		if a.count > 0 {
+			avgView = a.viewers / a.count
+		}
+		result = append(result, entity.QualitySummary{
+			Username:    username,
+			Site:        a.site,
+			Recordings:  a.count,
+			AvgDuration: avgDur,
+			AvgViewers:  avgView,
+			Resolutions: res,
+			TotalSize:   a.totalSize,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Recordings > result[j].Recordings
+	})
+	return result
 }

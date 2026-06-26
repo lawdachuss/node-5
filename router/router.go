@@ -109,8 +109,13 @@ func SetupViews(r *gin.Engine) {
 	// ── Nodes & Pool API ──────────────────────────────────────────────────
 	r.GET("/api/nodes", GetNodesJSON)
 	r.GET("/api/pool", GetPoolJSON)
+	r.GET("/api/pool/check", CheckPool)
 	r.POST("/api/pool/add", AddToPool)
 	r.POST("/api/pool/remove", RemoveFromPool)
+
+	// ── Admin API ─────────────────────────────────────────────────────────
+	r.GET("/api/admin/proxy", GetProxyStatusJSON)
+	r.GET("/api/admin/events", AdminEvents)
 
 }
 

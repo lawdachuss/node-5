@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sardanioss/httpcloak"
+	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/server"
 )
 
@@ -50,6 +51,30 @@ type httpcloakTransport struct {
 	proxyURLs []string
 	proxyIdx  int
 	renewing  bool // prevents re-entrant refreshProxies calls from RoundTrip recursion
+
+	lastRefreshTime time.Time
+	lastRefreshURLs []string
+}
+
+// GetProxyStatus returns a snapshot of the proxy pool state for the admin page.
+func GetProxyStatus() entity.ProxyStatus {
+	t, ok := getSharedTransport().(*httpcloakTransport)
+	if !ok {
+		return entity.ProxyStatus{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	refreshURLs := defaultProxyRefreshURLs
+	if server.Config != nil && server.Config.ProxyRefreshURL != "" {
+		refreshURLs = []string{server.Config.ProxyRefreshURL}
+	}
+	return entity.ProxyStatus{
+		PoolSize:        len(t.proxyURLs),
+		CurrentIndex:    t.proxyIdx,
+		RefreshURLs:     refreshURLs,
+		LastRefreshTime: t.lastRefreshTime.Format(time.RFC3339),
+		ConfigURL:       server.Config.ProxyURL,
+	}
 }
 
 // sharedTransportSingleton is a singleton http.RoundTripper for the shared transport.
@@ -428,6 +453,10 @@ func (t *httpcloakTransport) refreshProxies() bool {
 
 	for _, url := range refreshURLs {
 		if t.fetchProxiesFrom(url) {
+			t.mu.Lock()
+			t.lastRefreshTime = time.Now()
+			t.lastRefreshURLs = refreshURLs
+			t.mu.Unlock()
 			fmt.Printf("[proxy] loaded %d proxies from %s\n", len(t.proxyURLs), url)
 			return true
 		}
@@ -540,6 +569,7 @@ func StartProxyRefresher(ctx context.Context) {
 	// Do an initial refresh on startup
 	if t.refreshProxies() {
 		fmt.Println("[proxy] refreshed proxy list on startup")
+		publishProxyRefreshEvent(len(t.proxyURLs))
 	}
 
 	for {
@@ -549,9 +579,27 @@ func StartProxyRefresher(ctx context.Context) {
 		case <-ticker.C:
 			if t.refreshProxies() {
 				fmt.Println("[proxy] refreshed proxy list")
+				t.mu.Lock()
+				n := len(t.proxyURLs)
+				t.mu.Unlock()
+				publishProxyRefreshEvent(n)
 			}
 		}
 	}
+}
+
+func publishProxyRefreshEvent(count int) {
+	go func() {
+		if server.Manager == nil {
+			return
+		}
+		data, _ := json.Marshal(map[string]interface{}{
+			"type":    "proxy_refreshed",
+			"message": fmt.Sprintf("Proxy list refreshed: %d proxies available", count),
+			"time":    time.Now().Format(time.RFC3339),
+		})
+		server.Manager.PublishAdminEvent("proxy", data)
+	}()
 }
 
 // max returns the larger of a and b.

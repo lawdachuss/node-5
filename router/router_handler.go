@@ -107,6 +107,15 @@ type AdminData struct {
 	TotalNodeLoad   int
 	PoolMode        string
 	MyNodeID        string
+
+	// Session history
+	SessionHistory []entity.SessionEntry
+
+	// Proxy status
+	ProxyStatus entity.ProxyStatus
+
+	// Recording quality summary
+	QualitySummaries []entity.QualitySummary
 }
 
 // AdminPage renders the admin panel with deep upload/orphan matrices.
@@ -251,6 +260,15 @@ func AdminPage(c *gin.Context) {
 		}
 	}
 
+	// ── Session history ──
+	sessionHistory := server.Manager.SessionHistory()
+
+	// ── Proxy status ──
+	proxyStatus := internal.GetProxyStatus()
+
+	// ── Quality summaries ──
+	qualitySummaries := server.Manager.QualitySummaries(allRecs)
+
 	c.HTML(200, "admin.html", &AdminData{
 		Config:   server.Config,
 		Channels: channels,
@@ -280,6 +298,10 @@ func AdminPage(c *gin.Context) {
 		TotalNodeLoad: totalNodeLoad,
 		PoolMode:      server.ChannelPoolMode(),
 		MyNodeID:      server.NodeID(),
+
+		SessionHistory:   sessionHistory,
+		ProxyStatus:      proxyStatus,
+		QualitySummaries: qualitySummaries,
 	})
 }
 
@@ -1441,6 +1463,29 @@ type PoolAddRequest struct {
 	Framerate  int    `json:"framerate" form:"framerate"`
 }
 
+// CheckPool returns whether a channel already exists in the pool.
+func CheckPool(c *gin.Context) {
+	username := c.Query("username")
+	site := c.DefaultQuery("site", "chaturbate")
+	if username == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "username required"})
+		return
+	}
+
+	client := server.GetDBClient()
+	if client == nil {
+		c.JSON(http.StatusOK, gin.H{"exists": false})
+		return
+	}
+
+	existing, err := client.GetAssignment(username, site)
+	if err != nil || existing == nil {
+		c.JSON(http.StatusOK, gin.H{"exists": false})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"exists": true})
+}
+
 // AddToPool adds a channel to the shared pool.
 func AddToPool(c *gin.Context) {
 	var req PoolAddRequest
@@ -1492,6 +1537,20 @@ func AddToPool(c *gin.Context) {
 type PoolRemoveRequest struct {
 	Username string `json:"username" binding:"required"`
 	Site     string `json:"site"`
+}
+
+// GetProxyStatusJSON returns the current proxy pool state as JSON.
+func GetProxyStatusJSON(c *gin.Context) {
+	c.JSON(http.StatusOK, internal.GetProxyStatus())
+}
+
+// AdminEvents handles SSE subscriptions for admin-scoped events.
+func AdminEvents(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	server.Manager.AdminEventSubscriber(c.Writer, c.Request)
 }
 
 // RemoveFromPool removes a channel from the shared pool.

@@ -701,6 +701,15 @@
             <a href="/pool" class="edit-link">✎ Edit</a>
         </summary>
         <div class="section-body">
+            <div style="display:flex;gap:8px;align-items:center;margin-top:10px;margin-bottom:8px;flex-wrap:wrap">
+                <input type="text" id="pool-username" placeholder="Username" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-input);color:var(--text-primary);font-size:12px;width:160px;outline:none">
+                <select id="pool-site" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-input);color:var(--text-primary);font-size:12px;outline:none">
+                    <option value="chaturbate">Chaturbate</option>
+                    <option value="stripchat">Stripchat</option>
+                </select>
+                <button class="btn-action" onclick="addPoolInline()" style="background:var(--accent);color:#fff">Add to Pool</button>
+                <span id="pool-inline-msg" style="font-size:10px;color:var(--text-muted)"></span>
+            </div>
             <table class="admin-table">
                 <thead>
                     <tr>
@@ -912,6 +921,129 @@
                     <div class="label">Disk Critical</div>
                     <div class="val">{{ .Config.DiskCriticalPercent }}%</div>
                 </div>
+            </div>
+        </div>
+    </details>
+
+    <!-- ════════ SESSION HISTORY ════════ -->
+    <details class="section">
+        <summary><span class="arrow">▶</span> Session History <span class="count">{{ len .SessionHistory }}</span></summary>
+        <div class="section-body">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Channels</th>
+                        <th>Recordings</th>
+                        <th>Uploads</th>
+                        <th>Channels Recorded</th>
+                        <th>Completed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ if .SessionHistory }}
+                    {{ range .SessionHistory }}
+                    <tr>
+                        <td class="mono" style="font-size:10px">{{ .StartedAt }}</td>
+                        <td class="mono">{{ .Duration }}</td>
+                        <td class="mono">{{ .ChannelsCount }}</td>
+                        <td class="mono">{{ .TotalRecordings }}</td>
+                        <td class="mono">{{ .TotalUploads }}</td>
+                        <td class="mono truncate" style="max-width:200px" title="{{ .ChannelsRecorded }}">{{ .ChannelsRecorded }}</td>
+                        <td class="mono" style="font-size:10px">{{ .CompletedAt }}</td>
+                    </tr>
+                    {{ end }}
+                    {{ else }}
+                    <tr><td colspan="7" class="empty-state">No completed sessions yet</td></tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+    </details>
+
+    <!-- ════════ PROXY STATUS ════════ -->
+    <details class="section">
+        <summary><span class="arrow">▶</span> Proxy Status</summary>
+        <div class="section-body">
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <div class="label">Pool Size</div>
+                    <div class="val">{{ .ProxyStatus.PoolSize }}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="label">Current Index</div>
+                    <div class="val">{{ .ProxyStatus.CurrentIndex }}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="label">Config URL(s)</div>
+                    <div class="val" style="font-size:10px">{{ if .ProxyStatus.ConfigURL }}{{ .ProxyStatus.ConfigURL }}{{ else }}From defaults{{ end }}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="label">Last Refresh</div>
+                    <div class="val" style="font-size:10px">{{ if .ProxyStatus.LastRefreshTime }}{{ .ProxyStatus.LastRefreshTime }}{{ else }}Never{{ end }}</div>
+                </div>
+                <div class="detail-item" style="grid-column:1/-1">
+                    <div class="label">Refresh URLs</div>
+                    <div class="val" style="font-size:10px">
+                        {{ range .ProxyStatus.RefreshURLs }}
+                        <div class="mono" style="word-break:break-all;margin-bottom:2px">{{ . }}</div>
+                        {{ else }}
+                        <span style="color:var(--text-muted)">None</span>
+                        {{ end }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <!-- ════════ RECORDING QUALITY ════════ -->
+    <details class="section">
+        <summary><span class="arrow">▶</span> Recording Quality <span class="count">{{ len .QualitySummaries }}</span></summary>
+        <div class="section-body">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Channel</th>
+                        <th>Site</th>
+                        <th>Recordings</th>
+                        <th>Avg Duration</th>
+                        <th>Avg Viewers</th>
+                        <th>Resolutions</th>
+                        <th>Total Size</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ if .QualitySummaries }}
+                    {{ range .QualitySummaries }}
+                    <tr>
+                        <td><strong>{{ .Username }}</strong></td>
+                        <td>{{ .Site }}</td>
+                        <td class="mono">{{ .Recordings }}</td>
+                        <td class="mono">{{ printf "%.0f" .AvgDuration }}s</td>
+                        <td class="mono">{{ .AvgViewers }}</td>
+                        <td class="mono">{{ range .Resolutions }}{{ . }} {{ end }}</td>
+                        <td class="mono">{{ printf "%.1f" (divBytes .TotalSize) }} MB</td>
+                    </tr>
+                    {{ end }}
+                    {{ else }}
+                    <tr><td colspan="7" class="empty-state">No recordings yet</td></tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+    </details>
+
+    <!-- ════════ LIVE EVENTS ════════ -->
+    <details class="section">
+        <summary><span class="arrow">▶</span> Live Events <span class="count" id="event-count">0</span></summary>
+        <div class="section-body">
+            <div style="display:flex;gap:8px;align-items:center;margin-top:10px;margin-bottom:8px">
+                <button class="btn-action" onclick="clearEvents()" style="background:rgba(239,68,68,0.12);color:#ef4444">Clear</button>
+                <span style="font-size:10px;color:var(--text-muted)">Listening for session, proxy, and error events...</span>
+            </div>
+            <div id="events-container" style="max-height:400px;overflow-y:auto;font-family:ui-monospace,monospace;font-size:11px;background:var(--bg-input);border-radius:6px;padding:8px">
+                <div style="color:var(--text-muted);text-align:center;padding:12px" id="events-placeholder">Waiting for events...</div>
             </div>
         </div>
     </details>
@@ -1135,6 +1267,88 @@ function toggleTheme() {
     var btn = document.getElementById('theme-btn');
     if (btn) btn.textContent = isDark ? '☀️' : '🌙';
 }
+
+// ── Live events via SSE ──
+function connectAdminEvents() {
+    var es = new EventSource('/api/admin/events');
+    var container = document.getElementById('events-container');
+    var placeholder = document.getElementById('events-placeholder');
+    var countEl = document.getElementById('event-count');
+    var count = 0;
+    es.onmessage = function(e) {
+        if (placeholder) placeholder.style.display = 'none';
+        count++;
+        if (countEl) countEl.textContent = count;
+        var d = document.createElement('div');
+        d.style.padding = '3px 0';
+        d.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+        try {
+            var data = JSON.parse(e.data);
+            d.innerHTML = '<span style="color:var(--accent)">[' + (data.time || new Date().toISOString()) + ']</span> '
+                + '<span style="color:';
+            if (data.type === 'session_started' || data.type === 'session_completed') d.innerHTML += '#10b981';
+            else if (data.type && data.type.indexOf('error') >= 0) d.innerHTML += '#ef4444';
+            else d.innerHTML += 'var(--text-secondary)';
+            d.innerHTML += '">' + escHtml(data.type || 'event') + '</span> '
+                + '<span>' + escHtml(data.message || '') + '</span>';
+        } catch(_) {
+            d.innerHTML = '<span style="color:var(--text-muted)">' + escHtml(e.data) + '</span>';
+        }
+        container.insertBefore(d, container.firstChild);
+        // Keep max 200 events
+        while (container.children.length > 200) {
+            container.removeChild(container.lastChild);
+        }
+    };
+    es.onerror = function() {
+        // Reconnect is automatic with EventSource
+    };
+}
+
+function clearEvents() {
+    var container = document.getElementById('events-container');
+    var placeholder = document.getElementById('events-placeholder');
+    var countEl = document.getElementById('event-count');
+    if (container) container.innerHTML = '';
+    if (placeholder) {
+        placeholder.style.display = '';
+        container.appendChild(placeholder);
+    }
+    if (countEl) countEl.textContent = '0';
+}
+
+// ── Inline pool add ──
+function addPoolInline() {
+    var username = document.getElementById('pool-username').value.trim();
+    var site = document.getElementById('pool-site').value;
+    var msg = document.getElementById('pool-inline-msg');
+    if (!username) { msg.textContent = 'Enter a username'; return; }
+    msg.textContent = 'Adding...';
+    msg.style.color = 'var(--text-muted)';
+    fetch('/api/pool/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'username=' + encodeURIComponent(username) + '&site=' + encodeURIComponent(site)
+    }).then(function(r) {
+        if (r.ok) {
+            msg.textContent = '✓ Added';
+            msg.style.color = '#10b981';
+            document.getElementById('pool-username').value = '';
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            return r.text().then(function(t) {
+                msg.textContent = '✕ ' + t.substring(0, 40);
+                msg.style.color = '#ef4444';
+            });
+        }
+    }).catch(function() {
+        msg.textContent = '✕ Request failed';
+        msg.style.color = '#ef4444';
+    });
+}
+
+// Connect admin events on page load
+connectAdminEvents();
 
 function stopAllChannels() {
     if (!confirm('Stop all channels and begin processing uploads?')) return;
