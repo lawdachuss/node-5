@@ -155,24 +155,28 @@ def save_to_supabase(rest, api_key, value, settings_key="dvr_settings", is_seed=
     if result is not None and result != []:
         label = "seeded" if is_seed else "saved"
         print(f"  [OK] Cookies {label} to Supabase")
-    else:
-        label = "seed" if is_seed else "save"
-        print(f"  Row may not exist, trying INSERT for {label}...")
-        result = supabase_request(
-            "POST",
-            f"{rest}/app_settings",
-            api_key,
-            {"key": settings_key, "value": value},
-        )
-        if result is not None:
-            print(f"  [OK] Cookies {label}d into Supabase")
-        else:
-            print(f"  [ERROR] Failed to {label} cookies to Supabase")
-            if not is_seed:
-                sys.exit(1)
+        return
 
-    if is_seed and result is not None:
-        print("  Now proceeding to refresh cookies...")
+    label = "seed" if is_seed else "save"
+    print(f"  Row may not exist, trying INSERT for {label}...")
+    result = supabase_request(
+        "POST",
+        f"{rest}/app_settings",
+        api_key,
+        {"key": settings_key, "value": value},
+    )
+    if result is not None:
+        print(f"  [OK] Cookies {label}d into Supabase")
+        return
+
+    # POST may have failed due to transient error — retry PATCH once
+    print(f"  POST failed, retrying PATCH...")
+    result = supabase_request("PATCH", patch_url, api_key, {"value": value})
+    if result is not None and result != []:
+        print(f"  [OK] Cookies {label} to Supabase (PATCH retry)")
+        return
+
+    print(f"  [WARN] Failed to {label} cookies to Supabase (will retry next run)")
 
 
 def main():

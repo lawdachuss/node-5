@@ -110,6 +110,17 @@ jobs:
             return $null
           }
 
+          function Test-Chaturbate($proxyUrl) {
+            # Tests if the proxy can reach chaturbate.com at TCP level.
+            # Any HTTP response (even Cloudflare challenge) = proxy works.
+            # SOCKS5 error (97) = host unreachable through this proxy.
+            try {
+              $null = curl.exe -x $proxyUrl -s -o $null -w "" --max-time 15 https://chaturbate.com 2>&1
+              if ($LASTEXITCODE -eq 0) { return $true }
+            } catch {}
+            return $false
+          }
+
           log "=== Fetching live SOCKS5 proxies ==="
           $allProxies = @()
 
@@ -150,13 +161,12 @@ jobs:
 
           $selected = $null
           $selectedIp = $null
-          $fallbackProxy = $null
-          $fallbackIp = $null
+          $candidates = @()  # @{Proxy=...; Ip=...; Country=...; Org=...}
           $tested = 0
           $lastLogAt = 0
 
           log ""
-          log "=== Testing proxies (prefer NL/IN, accept any as last resort) ==="
+          log "=== Testing proxies (ipify + region) ==="
           foreach ($p in $allProxies) {
             $tested++
             if ($tested -ge $lastLogAt + 100) {
@@ -165,34 +175,54 @@ jobs:
             }
             $ip = Test-Proxy $p
             if (-not $ip) { continue }
-
             try {
               $locRaw = curl.exe -x $p -s -m 8 https://ipinfo.io/json 2>$null
               if ($locRaw) {
                 $loc = $locRaw | ConvertFrom-Json -ErrorAction Stop
-                $country = $loc.country
-                if ($country -eq "NL" -or $country -eq "IN") {
-                  $selected = $p
-                  $selectedIp = $ip
-                  log ""
-                  log "WORKING: $p"
-                  log "   IP: $ip / Country: $country ($($loc.org))"
-                  break
-                }
+                $candidates += @{ Proxy=$p; Ip=$ip; Country=$loc.country; Org=$loc.org }
               }
-            } catch {}
-            if (-not $fallbackProxy) {
-              $fallbackProxy = $p
-              $fallbackIp = $ip
-              log "  Fallback candidate: $p (IP: $ip) - will use if no NL/IN found"
+            } catch {
+              # ipinfo.io may fail for some proxies - still add as candidate
+              $candidates += @{ Proxy=$p; Ip=$ip; Country=""; Org="" }
+            }
+          }
+          log "  Total ipify-working proxies: $($candidates.Count)"
+
+          # Sort: NL/IN first, then any with location data, then unknown
+          $preferred = $candidates | Where-Object { $_.Country -eq "NL" -or $_.Country -eq "IN" }
+          $other = $candidates | Where-Object { $_.Country -ne "NL" -and $_.Country -ne "IN" }
+
+          log ""
+          log "=== Testing candidates against chaturbate.com ==="
+          if ($preferred.Count -gt 0) {
+            log "  Found $($preferred.Count) NL/IN proxy(ies), testing each..."
+            foreach ($c in $preferred) {
+              log "  Testing $($c.Proxy) ($($c.Country) - $($c.Org))..."
+              if (Test-Chaturbate $c.Proxy) {
+                $selected = $c.Proxy
+                $selectedIp = $c.Ip
+                log "  chaturbate.com OK: $selected ($($c.Country) - $($c.Org))"
+                break
+              } else {
+                log "  chaturbate.com UNREACHABLE, trying next..."
+              }
             }
           }
 
-          if (-not $selected -and $fallbackProxy) {
-            $selected = $fallbackProxy
-            $selectedIp = $fallbackIp
-            log ""
-            log "No NL/IN proxy found - using fallback: $selected (IP: $selectedIp)"
+          if (-not $selected -and $other.Count -gt 0) {
+            log "  No chaturbate-accessible NL/IN proxy, testing $($other.Count) others..."
+            foreach ($c in $other) {
+              $locLabel = if ($c.Country) { "$($c.Country) - $($c.Org)" } else { "unknown location" }
+              log "  Testing $($c.Proxy) ($locLabel)..."
+              if (Test-Chaturbate $c.Proxy) {
+                $selected = $c.Proxy
+                $selectedIp = $c.Ip
+                log "  chaturbate.com OK: $selected ($locLabel)"
+                break
+              } else {
+                log "  chaturbate.com UNREACHABLE, trying next..."
+              }
+            }
           }
 
           if (-not $selected) {
@@ -209,11 +239,7 @@ jobs:
             exit 1
           }
 
-          $regionLabel = ""
-          try {
-            $loc = curl.exe -x $selected -s -m 8 https://ipinfo.io/json 2>$null | ConvertFrom-Json
-            $regionLabel = " / $($loc.country) - $($loc.org)"
-          } catch {}
+          log "Selected proxy: $selected (IP: $selectedIp)"
 
           echo "ALL_PROXY=$selected" >> $env:GITHUB_ENV
           echo "all_proxy=$selected" >> $env:GITHUB_ENV
@@ -221,8 +247,7 @@ jobs:
 
           & git config --global http.proxy $selected
           & git config --global https.proxy $selected
-          log "[OK] Git configured to use $selected$regionLabel"
-          log "[OK] Proxy configured for Git operations"
+          log "[OK] Git configured to use $selected"
 
           log "Verifying proxy egress..."
           try {
