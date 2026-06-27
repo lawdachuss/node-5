@@ -162,31 +162,47 @@ jobs:
           $selected = $null
           $selectedIp = $null
           $candidates = @()  # @{Proxy=...; Ip=...; Country=...; Org=...}
-          $tested = 0
-          $lastLogAt = 0
 
           log ""
-          log "=== Testing proxies (ipify + region) ==="
+          log "=== Testing proxies in parallel (ipify + region) ==="
+          $parallelCount = [Math]::Min(20, $allProxies.Count)
+          $runspacePool = [runspacefactory]::CreateRunspacePool(1, $parallelCount)
+          $runspacePool.Open()
+          $proxyJobs = @()
           foreach ($p in $allProxies) {
-            $tested++
-            if ($tested % 10 -eq 0) { Write-Host "." -NoNewline }
-            if ($tested -ge $lastLogAt + 25) {
-              log "  Tested $tested/$($allProxies.Count) proxies..."
-              $lastLogAt = $tested
-            }
-            $ip = Test-Proxy $p
-            if (-not $ip) { continue }
-            try {
-              $locRaw = curl.exe -x $p -s -m 5 https://ipinfo.io/json 2>$null
-              if ($locRaw) {
-                $loc = $locRaw | ConvertFrom-Json -ErrorAction Stop
-                $candidates += @{ Proxy=$p; Ip=$ip; Country=$loc.country; Org=$loc.org }
-              }
-            } catch {
-              # ipinfo.io may fail for some proxies - still add as candidate
-              $candidates += @{ Proxy=$p; Ip=$ip; Country=""; Org="" }
-            }
+            $ps = [powershell]::Create()
+            $ps.RunspacePool = $runspacePool
+            $null = $ps.AddScript({
+              param($url)
+              $result = $null
+              try {
+                $ip = curl.exe -x $url -s -m 5 https://api.ipify.org 2>$null
+                if ($ip -match '^\d+\.\d+\.\d+\.\d+$') {
+                  $ip = $ip.Trim()
+                  $locRaw = curl.exe -x $url -s -m 5 https://ipinfo.io/json 2>$null
+                  if ($locRaw) {
+                    try { $loc = $locRaw | ConvertFrom-Json -ErrorAction Stop; $country = $loc.country; $org = $loc.org } catch { $country = ""; $org = "" }
+                  } else { $country = ""; $org = "" }
+                  $result = @{ Proxy=$url; Ip=$ip; Country=$country; Org=$org }
+                }
+              } catch {}
+              return $result
+            }).AddArgument($p)
+            $proxyJobs += @{ PowerShell=$ps; AsyncResult=$ps.BeginInvoke(); Proxy=$p }
           }
+          $done = 0
+          foreach ($j in $proxyJobs) {
+            try {
+              $r = $j.PowerShell.EndInvoke($j.AsyncResult)
+              if ($r) { $candidates += $r; Write-Host "+" -NoNewline }
+              else { Write-Host "." -NoNewline }
+            } catch { Write-Host "x" -NoNewline }
+            $done++
+            if ($done % 20 -eq 0) { log "  Tested $done/$($allProxies.Count) proxies..." }
+            $j.PowerShell.Dispose()
+          }
+          $runspacePool.Dispose()
+          log ""
           log "  Total ipify-working proxies: $($candidates.Count)"
 
           # Sort: NL/IN first, then any with location data, then unknown
@@ -195,38 +211,47 @@ jobs:
 
           log ""
           log "=== Testing candidates against chaturbate.com ==="
-          $chtTested = 0
-          if ($preferred.Count -gt 0) {
-            log "  Found $($preferred.Count) NL/IN proxy(ies), testing each..."
-            foreach ($c in $preferred) {
-              $chtTested++
-              Write-Host "." -NoNewline
-              if (Test-Chaturbate $c.Proxy) {
-                log ""
-                log "  chaturbate.com OK: $($c.Proxy) ($($c.Country) - $($c.Org))"
-                $selected = $c.Proxy
-                $selectedIp = $c.Ip
-                break
-              }
+          if ($preferred.Count -gt 0 -or $other.Count -gt 0) {
+            $allCandidates = $preferred + $other
+            log "  Testing $($allCandidates.Count) candidate(s) in parallel..."
+            $chtPool = [runspacefactory]::CreateRunspacePool(1, [Math]::Min(10, $allCandidates.Count))
+            $chtPool.Open()
+            $chtJobs = @()
+            foreach ($c in $allCandidates) {
+              $ps = [powershell]::Create()
+              $ps.RunspacePool = $chtPool
+              $null = $ps.AddScript({
+                param($proxyUrl)
+                try {
+                  $null = curl.exe -x $proxyUrl -s -o $null -w "" --max-time 10 https://chaturbate.com 2>&1
+                  return ($LASTEXITCODE -eq 0)
+                } catch { return $false }
+              }).AddArgument($c.Proxy)
+              $chtJobs += @{ PowerShell=$ps; AsyncResult=$ps.BeginInvoke(); Candidate=$c }
             }
-            if (-not $selected) { log "" }
-          }
-
-          if (-not $selected -and $other.Count -gt 0) {
-            log "  No chaturbate-accessible NL/IN proxy, testing $($other.Count) others..."
-            foreach ($c in $other) {
-              $chtTested++
-              Write-Host "." -NoNewline
-              $locLabel = if ($c.Country) { "$($c.Country) - $($c.Org)" } else { "unknown location" }
-              if (Test-Chaturbate $c.Proxy) {
-                log ""
-                log "  chaturbate.com OK: $($c.Proxy) ($locLabel)"
-                $selected = $c.Proxy
-                $selectedIp = $c.Ip
-                break
-              }
+            $chtDone = 0
+            foreach ($j in $chtJobs) {
+              try {
+                $ok = $j.PowerShell.EndInvoke($j.AsyncResult)
+                if ($ok -and -not $selected) {
+                  $c = $j.Candidate
+                  $locLabel = if ($c.Country) { "$($c.Country) - $($c.Org)" } else { "unknown location" }
+                  log "  chaturbate.com OK: $($c.Proxy) ($locLabel)"
+                  $selected = $c.Proxy
+                  $selectedIp = $c.Ip
+                } elseif ($ok) {
+                  Write-Host "+" -NoNewline
+                } else {
+                  Write-Host "." -NoNewline
+                }
+              } catch { Write-Host "x" -NoNewline }
+              $chtDone++
+              if ($chtDone % 20 -eq 0) { log "  Checked $chtDone/$($allCandidates.Count)..." }
+              $j.PowerShell.Dispose()
             }
-            if (-not $selected) { log "" }
+            $chtPool.Dispose()
+            if ($selected) { log "  Selected proxy: $selected" }
+            else { log ""; log "  No candidate can reach chaturbate.com" }
           }
 
           if (-not $selected) {
