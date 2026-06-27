@@ -453,13 +453,15 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] Scrapling installed, installing Chromium browser..."
             $chromiumOk = $false
-            # Strategy 1: Try Playwright CDN with retries (503 is often transient)
+            # Strategy 1: Try Playwright CDN with retries (503/ECONNRESET is often transient)
             foreach ($dh in @("https://playwright.azureedge.net", "https://cdn.playwright.dev")) {
               foreach ($wait in @(10, 20)) {
                 $env:PLAYWRIGHT_DOWNLOAD_HOST = $dh
                 Write-Host "  Downloading Chromium from $dh (retry after ${wait}s)..."
-                python -m playwright install chromium 2>&1
+                $out = & { python -m playwright install chromium } 2>&1
                 if ($LASTEXITCODE -eq 0) { $chromiumOk = $true; break }
+                Write-Host "    Download failed (exit $LASTEXITCODE)"
+                $out -split "`n" | Select-Object -Last 3 | ForEach-Object { Write-Host "    $_" }
                 Start-Sleep -Seconds $wait
               }
               if ($chromiumOk) { break }
