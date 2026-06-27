@@ -2,8 +2,8 @@
 """Cookie Refresher for Chaturbate DVR.
 
 Reads current cookies from Supabase, tries to refresh cf_clearance using
-curl_cffi (browser TLS impersonation — no full browser needed), merges
-with existing sessionid/csrftoken, and writes back to Supabase.
+Scrapling (Playwright stealth browser with Cloudflare Turnstile solving),
+merges with existing sessionid/csrftoken, and writes back to Supabase.
 
 If refresh fails, existing cookies are kept (they usually remain valid).
 
@@ -82,92 +82,88 @@ def extract_single_cookie(cookie_str, name):
     return None
 
 
-def try_refresh_with_curl_cffi(user_agent, proxy=None):
-    """Try to get fresh cookies using curl_cffi (browser TLS impersonation).
+def try_refresh_with_scrapling(user_agent, proxy=None):
+    """Try to get fresh cookies using Scrapling stealth browser.
+
+    Uses Scrapling's StealthyFetcher (Playwright with anti-detection patches)
+    to navigate to chaturbate.com, bypass Cloudflare Turnstile via
+    solve_cloudflare=True, then extracts cookies from the Playwright context.
+
+    Falls back to DynamicFetcher if StealthyFetcher is unavailable.
 
     Returns dict of new cookies, or empty dict on failure.
-    curl_cffi is lighter than a full browser and doesn't trigger Turnstile.
     """
     try:
-        from curl_cffi import requests as cffi_requests
+        from scrapling.fetchers import StealthyFetcher as _Fetcher
+        cls_name = "StealthyFetcher"
     except ImportError:
-        print("  [INFO] curl_cffi not available")
-        return {}
-
-    print("  Trying curl_cffi (browser TLS impersonation)...")
-
-    # Use latest Chrome impersonation to match Cloudflare expectations
-    impersonate = "chrome146"
-    session_cookies = {}
-    cffi_session = cffi_requests.Session()
-
-    proxies = None
-    if proxy:
-        # curl_cffi uses socks5h:// for DNS resolution through proxy
-        if proxy.startswith("socks5://"):
-            proxy_h = proxy.replace("socks5://", "socks5h://", 1)
-        else:
-            proxy_h = proxy
-        proxies = {"https": proxy_h, "http": proxy_h}
-        print(f"  Using proxy: {proxy}")
-
-    common_headers = {"User-Agent": user_agent} if user_agent else {}
-    common_headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    common_headers["Accept-Language"] = "en-US,en;q=0.5"
-
-    # First: visit chaturbate.com — Cloudflare evaluates TLS fingerprint
-    for attempt in range(2):
         try:
-            resp = cffi_session.get(
-                "https://chaturbate.com",
-                impersonate=impersonate,
-                timeout=60,
-                proxies=proxies,
-                headers=common_headers,
-                allow_redirects=True,
-            )
-            if attempt == 0:
-                print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
-            else:
-                print(f"  Follow-up status: {resp.status_code}")
-
-            # Extract cookies — cf_clearance is often set on the second request
-            extract_cookies(resp, session_cookies, prefix="  " if attempt == 0 else "  [follow-up]")
-
-            # If we have cf_clearance after first request, no need for second
-            if "cf_clearance" in session_cookies:
-                break
-
-        except Exception as e:
-            print(f"  [WARN] curl_cffi request failed (attempt {attempt+1}): {e}")
-            if attempt == 0:
-                continue
+            from scrapling.fetchers import DynamicFetcher as _Fetcher
+            cls_name = "DynamicFetcher"
+        except ImportError:
+            print("  [INFO] Scrapling not available (pip install 'scrapling[fetchers]')")
             return {}
 
-    if not session_cookies:
-        print("  [INFO] No cookies from curl_cffi")
-        return {}
+    print(f"  Using {cls_name} (Playwright-based stealth browser)...")
 
-    return session_cookies
+    for mode_name, mode_proxy in [("direct", None), ("proxy", proxy)]:
+        if mode_name == "proxy" and not proxy:
+            continue
+        print(f"  [{mode_name}] Connecting via {mode_proxy or 'direct'}...")
 
+        pw_proxy = None
+        if mode_proxy:
+            pw_proxy = mode_proxy.replace("socks5h://", "socks5://", 1)
 
-def extract_cookies(resp, store, prefix="  "):
-    """Extract cookies from a curl_cffi response into store dict."""
-    if hasattr(resp, "cookies"):
-        for name, value in resp.cookies.items():
-            if name not in store:
-                store[name] = value
-                print(f"{prefix} Cookie: {name}={value[:30]}...")
+        try:
+            with _Fetcher(
+                headless=True,
+                solve_cloudflare=True,
+                proxy=pw_proxy,
+            ) as fetcher:
+                session = fetcher.session
+                print(f"  [{mode_name}] Browser launched, navigating to chaturbate.com...")
 
-    # Also check Set-Cookie headers directly
-    if hasattr(resp, "headers"):
-        for header_val in resp.headers.get_list("set-cookie"):
-            if "=" in header_val:
-                name = header_val.split("=")[0].strip()
-                value = header_val.split("=", 1)[1].split(";")[0].strip()
-                if name and value and name not in store:
-                    store[name] = value
-                    print(f"{prefix} Cookie (header): {name}={value[:30]}...")
+                resp = session.fetch("https://chaturbate.com", timeout=90)
+                status = getattr(resp, "status", "?")
+                print(f"  [{mode_name}] Page status: {status}")
+
+                body = getattr(resp, "text", "") or ""
+                if "verify your age" in body.lower():
+                    print(f"  [{mode_name}] Age verification detected")
+                    continue
+
+                context = getattr(session, "context", None)
+                if context is not None:
+                    try:
+                        pw_cookies = context.cookies()
+                        print(f"  [{mode_name}] Got {len(pw_cookies)} cookies from Playwright")
+
+                        new_cookies = {}
+                        for c in pw_cookies:
+                            name = c.get("name", "")
+                            value = c.get("value", "")
+                            if name and value:
+                                new_cookies[name] = value
+                                if name in ("cf_clearance", "sessionid", "csrftoken", "__cf_bm"):
+                                    print(f"  [{mode_name}] {name}=...{value[-20:]}")
+
+                        if "cf_clearance" in new_cookies:
+                            print(f"  [{mode_name}] Got cf_clearance!")
+                            return new_cookies
+                        if new_cookies:
+                            print(f"  [{mode_name}] Got {len(new_cookies)} cookies but no cf_clearance")
+                            return new_cookies
+                    except Exception as e:
+                        print(f"  [{mode_name}] Cookie extraction error: {e}")
+                else:
+                    print(f"  [{mode_name}] No Playwright context available")
+        except Exception as e:
+            print(f"  [{mode_name}] Scrapling failed: {e}")
+            continue
+
+    print("  [INFO] No cookies from Scrapling (both direct and proxy failed)")
+    return {}
 
 
 def save_to_supabase(rest, api_key, value, settings_key="dvr_settings", is_seed=False):
@@ -293,7 +289,7 @@ def main():
     # --- Try to refresh cookies ---
     print("\n[2/3] Refreshing cookies...")
 
-    new_cookies = try_refresh_with_curl_cffi(user_agent, proxy)
+    new_cookies = try_refresh_with_scrapling(user_agent, proxy)
 
     # --- Merge and save ---
     print("\n[3/3] Merging cookies...")
@@ -317,7 +313,7 @@ def main():
         elif new_cf:
             print(f"  cf_clearance unchanged (still valid)")
         else:
-            print(f"  [WARN] No new cf_clearance from curl_cffi — refresh may have been blocked")
+            print(f"  [WARN] No new cf_clearance from Scrapling — refresh may have been blocked")
     else:
         print("  [INFO] Cookie refresh failed — keeping existing cf_clearance")
         # Keep the existing cf_clearance even if stale. Without ANY clearance

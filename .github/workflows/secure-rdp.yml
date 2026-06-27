@@ -445,24 +445,27 @@ jobs:
             Write-Host "[OK] Wrote .env for cookie refresher"
           }
           $skipRefresh = $false
-          # Install PySocks so pip can handle ALL_PROXY=socks5:// natively
-          Write-Host "Installing PySocks (needed for pip SOCKS5 support)..."
-          $pysocksWheel = "$env:TEMP\PySocks-1.7.1-py3-none-any.whl"
-          curl.exe --noproxy "*" -sSfL --max-time 30 -o $pysocksWheel "https://files.pythonhosted.org/packages/8d/59/b4572118e098ac8e46e399a1dd0f2d85403ce8bbaad9ec79373ed6badaf9/PySocks-1.7.1-py3-none-any.whl"
-          if ($LASTEXITCODE -eq 0 -and (Test-Path $pysocksWheel)) {
-            pip install --disable-pip-version-check $pysocksWheel
-            Write-Host "[OK] PySocks installed"
+          # Install Scrapling + Playwright Chromium for Cloudflare Turnstile bypass
+          Write-Host "Installing Scrapling with fetchers (Playwright-based stealth browser)..."
+          $env:NO_PROXY = "pypi.org,files.pythonhosted.org,*.pythonhosted.org,playwright.azureedge.net,storage.googleapis.com"
+          $env:no_proxy = "pypi.org,files.pythonhosted.org,*.pythonhosted.org,playwright.azureedge.net,storage.googleapis.com"
+          pip install --default-timeout=120 "scrapling[fetchers]"
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] Scrapling installed, installing Chromium browser..."
+            python -m playwright install chromium
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "[OK] Chromium installed for Scrapling"
+            } else {
+              Write-Warning "Chromium install failed, trying via scrapling CLI..."
+              scrapling install 2>$null
+              if ($LASTEXITCODE -ne 0) { Write-Warning "scrapling install also failed"; $skipRefresh = $true }
+            }
           } else {
-            Write-Warning "PySocks download failed - pip may have SOCKS issues"
+            Write-Warning "Scrapling install failed, skipping cookie refresh"
+            $skipRefresh = $true
           }
-          # ALL_PROXY stays set - but exclude PyPI from proxy (unreliable over SOCKS5)
-          Write-Host "Installing curl_cffi for cookie refresh (lightweight, no browser needed)..."
-          $env:NO_PROXY = "pypi.org,files.pythonhosted.org,*.pythonhosted.org"
-          $env:no_proxy = "pypi.org,files.pythonhosted.org,*.pythonhosted.org"
-          pip install --default-timeout=60 curl_cffi
           Remove-Item Env:NO_PROXY -ErrorAction SilentlyContinue
           Remove-Item Env:no_proxy -ErrorAction SilentlyContinue
-          if ($LASTEXITCODE -ne 0) { Write-Warning "curl_cffi install failed, skipping cookie refresh"; $skipRefresh = $true }
           if (-not $skipRefresh) {
             Write-Host "Running cookie refresher..."
             Set-Location $repoDir

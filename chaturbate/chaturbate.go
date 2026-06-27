@@ -164,13 +164,17 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 			return nil, StatusPrivate, internal.ErrPasswordRequired
 		}
 		// Try the GET API as fallback
+		fmt.Printf("[DEBUG] %s: POST API failed (%v), trying GET API fallback\n", username, err)
 		resp, apiErr := fetchAPIResponse(ctx, client, username)
 		if apiErr != nil {
+			fmt.Printf("[DEBUG] %s: GET API also failed: %v\n", username, apiErr)
 			if errors.Is(apiErr, internal.ErrPasswordRequired) {
 				return nil, StatusPrivate, internal.ErrPasswordRequired
 			}
 			return nil, "", apiErr
 		}
+
+		fmt.Printf("[DEBUG] %s: GET API succeeded: room_status=%q hls_source=%q url=%q\n", username, resp.RoomStatus, resp.HLSSource, resp.URL)
 
 		if roomInfo != nil {
 			roomInfo.RoomTitle = resp.RoomTitle
@@ -189,6 +193,7 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 		}
 
 		if resp.StreamURL() == "" {
+			fmt.Printf("[DEBUG] %s: GET API returned empty StreamURL (hls_source=%q url=%q room_status=%q)\n", username, resp.HLSSource, resp.URL, resp.RoomStatus)
 			return nil, resp.RoomStatus, internal.ErrChannelOffline
 		}
 
