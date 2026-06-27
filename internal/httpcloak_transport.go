@@ -30,13 +30,13 @@ import (
 //
 // Priority:
 //  1. Safe-region filtered via ProxyScrape API
-//  2. All-region fallback via raw.githubusercontent.com; age verification is
-//     still detected at the HTTP response level and triggers proxy rotation
+//  2. All-region fallback; age verification is still detected at the HTTP
+//     response level (ErrAgeVerification) and triggers proxy rotation
 //
 // Sources: ProxyScrape free proxy lists.
 var defaultProxyRefreshURLs = []string{
 	"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl,ca,in,jp,kr,sg,my,ph,id,th,vn,br,ar,cl,co,mx,za,ng,ke,ma,tn",
-	"https://raw.githubusercontent.com/proxyscrape/free-proxy-list/main/proxies/socks5/data.txt",
+	"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5",
 }
 
 // httpcloakTransport wraps httpcloak.Client as an http.RoundTripper.

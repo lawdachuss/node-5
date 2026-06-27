@@ -124,24 +124,14 @@ jobs:
           log "=== Fetching live SOCKS5 proxies ==="
           $allProxies = @()
 
-          # Source 1: ProxyScrape API - Netherlands SOCKS5
-          log "Fetching NL proxies from ProxyScrape API..."
-          $allProxies += Fetch-Proxies "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl"
-          log "  Got $($allProxies.Count) NL proxies from API"
+          # Source 1: ProxyScrape API - safe-region SOCKS5 (NL, CA, IN, JP, KR, SE Asia, SA, Africa)
+          log "Fetching safe-region proxies from ProxyScrape API..."
+          $allProxies += Fetch-Proxies "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl,ca,in,jp,kr,sg,my,ph,id,th,vn,br,ar,cl,co,mx,za,ng,ke,ma,tn"
+          log "  Got $($allProxies.Count) safe-region proxies"
 
-          # Source 2: jsDelivr CDN mirror of ProxyScrape - Netherlands SOCKS5
-          log "Fetching NL proxies from CDN mirror..."
-          $allProxies += Fetch-Proxies "https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/countries/nl/socks5/data.txt"
-          log "  Total: $($allProxies.Count) NL proxies"
-
-          # Source 3: ProxyScrape API - India SOCKS5 (fallback region)
-          log "Fetching IN proxies from ProxyScrape API..."
-          $allProxies += Fetch-Proxies "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=in"
-          log "  Total: $($allProxies.Count) proxies (NL + IN)"
-
-          # Source 4: All regions SOCKS5 from CDN mirror (broad fallback)
-          log "Fetching all-region proxies from CDN mirror..."
-          $allProxies += Fetch-Proxies "https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/socks5/data.txt"
+          # Source 2: ProxyScrape API - all-region SOCKS5 (broad fallback)
+          log "Fetching all-region proxies from ProxyScrape API..."
+          $allProxies += Fetch-Proxies "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5"
           
           # Remove duplicates
           $allProxies = $allProxies | Select-Object -Unique
