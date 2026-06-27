@@ -474,7 +474,8 @@ jobs:
           # Step 2: Verify binary exists
           $dvrExe = "$repoDir\chaturbate-dvr.exe"
           if (-not (Test-Path $dvrExe)) { Write-Error "Binary not found: $dvrExe"; exit 1 }
-          Write-Host "[OK] Binary exists at $dvrExe ($((Get-Item $dvrExe).Length) bytes)"
+          $dvrSize = (Get-Item $dvrExe).Length
+          Write-Host "[OK] Binary exists at $dvrExe ($dvrSize bytes)"
 
           Write-Host "=== Binary validation ==="
           $v = & $dvrExe --version 2>&1
