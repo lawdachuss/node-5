@@ -307,8 +307,13 @@ func (ch *Channel) exportInfo(includeLogs bool) *entity.ChannelInfo {
 	var logsCopy []string
 	if includeLogs {
 		ch.logsMu.Lock()
-		logsCopy = make([]string, len(ch.Logs))
-		copy(logsCopy, ch.Logs)
+		n := len(ch.Logs)
+		const maxDisplayLogs = 20
+		if n > maxDisplayLogs {
+			n = maxDisplayLogs
+		}
+		logsCopy = make([]string, n)
+		copy(logsCopy, ch.Logs[len(ch.Logs)-n:])
 		ch.logsMu.Unlock()
 	}
 
