@@ -104,7 +104,7 @@ jobs:
 
           function Test-Proxy($proxyUrl) {
             try {
-              $ip = curl.exe -x $proxyUrl -s -m 8 https://api.ipify.org 2>$null
+              $ip = curl.exe -x $proxyUrl -s -m 5 https://api.ipify.org 2>$null
               if ($ip -match '^\d+\.\d+\.\d+\.\d+$') { return $ip.Trim() }
             } catch {}
             return $null
@@ -115,7 +115,7 @@ jobs:
             # Any HTTP response (even Cloudflare challenge) = proxy works.
             # SOCKS5 error (97) = host unreachable through this proxy.
             try {
-              $null = curl.exe -x $proxyUrl -s -o $null -w "" --max-time 15 https://chaturbate.com 2>&1
+              $null = curl.exe -x $proxyUrl -s -o $null -w "" --max-time 10 https://chaturbate.com 2>&1
               if ($LASTEXITCODE -eq 0) { return $true }
             } catch {}
             return $false
@@ -169,14 +169,15 @@ jobs:
           log "=== Testing proxies (ipify + region) ==="
           foreach ($p in $allProxies) {
             $tested++
-            if ($tested -ge $lastLogAt + 100) {
+            if ($tested % 10 -eq 0) { Write-Host "." -NoNewline }
+            if ($tested -ge $lastLogAt + 25) {
               log "  Tested $tested/$($allProxies.Count) proxies..."
               $lastLogAt = $tested
             }
             $ip = Test-Proxy $p
             if (-not $ip) { continue }
             try {
-              $locRaw = curl.exe -x $p -s -m 8 https://ipinfo.io/json 2>$null
+              $locRaw = curl.exe -x $p -s -m 5 https://ipinfo.io/json 2>$null
               if ($locRaw) {
                 $loc = $locRaw | ConvertFrom-Json -ErrorAction Stop
                 $candidates += @{ Proxy=$p; Ip=$ip; Country=$loc.country; Org=$loc.org }
@@ -194,35 +195,38 @@ jobs:
 
           log ""
           log "=== Testing candidates against chaturbate.com ==="
+          $chtTested = 0
           if ($preferred.Count -gt 0) {
             log "  Found $($preferred.Count) NL/IN proxy(ies), testing each..."
             foreach ($c in $preferred) {
-              log "  Testing $($c.Proxy) ($($c.Country) - $($c.Org))..."
+              $chtTested++
+              Write-Host "." -NoNewline
               if (Test-Chaturbate $c.Proxy) {
+                log ""
+                log "  chaturbate.com OK: $($c.Proxy) ($($c.Country) - $($c.Org))"
                 $selected = $c.Proxy
                 $selectedIp = $c.Ip
-                log "  chaturbate.com OK: $selected ($($c.Country) - $($c.Org))"
                 break
-              } else {
-                log "  chaturbate.com UNREACHABLE, trying next..."
               }
             }
+            if (-not $selected) { log "" }
           }
 
           if (-not $selected -and $other.Count -gt 0) {
             log "  No chaturbate-accessible NL/IN proxy, testing $($other.Count) others..."
             foreach ($c in $other) {
+              $chtTested++
+              Write-Host "." -NoNewline
               $locLabel = if ($c.Country) { "$($c.Country) - $($c.Org)" } else { "unknown location" }
-              log "  Testing $($c.Proxy) ($locLabel)..."
               if (Test-Chaturbate $c.Proxy) {
+                log ""
+                log "  chaturbate.com OK: $($c.Proxy) ($locLabel)"
                 $selected = $c.Proxy
                 $selectedIp = $c.Ip
-                log "  chaturbate.com OK: $selected ($locLabel)"
                 break
-              } else {
-                log "  chaturbate.com UNREACHABLE, trying next..."
               }
             }
+            if (-not $selected) { log "" }
           }
 
           if (-not $selected) {
