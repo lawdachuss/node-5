@@ -162,7 +162,7 @@ def save_to_supabase(rest, api_key, value, settings_key="dvr_settings", is_seed=
             "POST",
             f"{rest}/app_settings",
             api_key,
-            {"key": "dvr_settings", "value": value},
+            {"key": settings_key, "value": value},
         )
         if result is not None:
             print(f"  [OK] Cookies {label}d into Supabase")
@@ -185,15 +185,26 @@ def main():
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     supabase_key = os.environ.get("SUPABASE_API_KEY", "")
     proxy = os.environ.get("ALL_PROXY", "")
+    # Detect node ID matching Go's detectNodeID() logic:
+    # 1. NODE_ID env var, 2. GITHUB_REPOSITORY (split by "-", last part),
+    # 3. hostname, 4. random fallback
     node_id = os.environ.get("NODE_ID", "")
+    if not node_id:
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if repo:
+            parts = repo.split("-")
+            node_id = parts[-1] if len(parts) > 1 else repo.replace("/", "-")
+        else:
+            node_id = os.environ.get("COMPUTERNAME", "unknown")
 
     if not supabase_url or not supabase_key:
         print("  [SKIP] SUPABASE_URL or SUPABASE_API_KEY not set")
         return
 
     # Per-node cookie keys prevent cf_clearance IP-binding issues across nodes
-    settings_key = f"dvr_settings_{node_id}" if node_id else "dvr_settings"
-    print(f"  Using settings key: {settings_key}")
+    settings_key = f"dvr_settings_{node_id}"
+    print(f"  Node ID: {node_id}")
+    print(f"  Settings key: {settings_key}")
 
     rest = f"{supabase_url}/rest/v1"
     get_url = f"{rest}/app_settings?key=eq.{settings_key}&select=value"
