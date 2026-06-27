@@ -85,26 +85,15 @@ def extract_single_cookie(cookie_str, name):
 def try_refresh_with_scrapling(user_agent, proxy=None):
     """Try to get fresh cookies using Scrapling stealth browser.
 
-    Uses Scrapling's StealthyFetcher (Playwright with anti-detection patches)
+    Uses Scrapling's StealthySession (Playwright with anti-detection patches)
     to navigate to chaturbate.com, bypass Cloudflare Turnstile via
     solve_cloudflare=True, then extracts cookies from the Playwright context.
 
-    Falls back to DynamicFetcher if StealthyFetcher is unavailable.
+    Falls back to DynamicSession, then StealthyFetcher if unavailable.
 
     Returns dict of new cookies, or empty dict on failure.
     """
-    try:
-        from scrapling.fetchers import StealthyFetcher as _Fetcher
-        cls_name = "StealthyFetcher"
-    except ImportError:
-        try:
-            from scrapling.fetchers import DynamicFetcher as _Fetcher
-            cls_name = "DynamicFetcher"
-        except ImportError:
-            print("  [INFO] Scrapling not available (pip install 'scrapling[fetchers]')")
-            return {}
-
-    print(f"  Using {cls_name} (Playwright-based stealth browser)...")
+    from scrapling.fetchers import StealthySession, DynamicSession, StealthyFetcher
 
     channel = os.environ.get("SCRAPLING_CHANNEL", "")
 
@@ -117,16 +106,18 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
         if mode_proxy:
             pw_proxy = mode_proxy.replace("socks5h://", "socks5://", 1)
 
+        # Build common kwargs for all session types
         kwargs = dict(headless=True, solve_cloudflare=True, proxy=pw_proxy)
         if channel:
             kwargs["channel"] = channel
             print(f"  [{mode_name}] Using browser channel: {channel}")
 
-        try:
-            with _Fetcher(**kwargs) as fetcher:
-                session = fetcher.session
-                print(f"  [{mode_name}] Browser launched, navigating to chaturbate.com...")
+        new_cookies = {}
 
+        # Strategy A: StealthySession (context manager, full stealth)
+        try:
+            print(f"  [{mode_name}] Trying StealthySession...")
+            with StealthySession(**kwargs) as session:
                 resp = session.fetch("https://chaturbate.com", timeout=90)
                 status = getattr(resp, "status", "?")
                 print(f"  [{mode_name}] Page status: {status}")
@@ -134,38 +125,97 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
                 body = getattr(resp, "text", "") or ""
                 if "verify your age" in body.lower():
                     print(f"  [{mode_name}] Age verification detected")
+                    StealthySession = None
                     continue
 
                 context = getattr(session, "context", None)
                 if context is not None:
-                    try:
+                    pw_cookies = context.cookies()
+                    print(f"  [{mode_name}] Got {len(pw_cookies)} cookies from Playwright")
+                    for c in pw_cookies:
+                        name = c.get("name", "")
+                        value = c.get("value", "")
+                        if name and value:
+                            new_cookies[name] = value
+                            if name in ("cf_clearance", "sessionid", "csrftoken", "__cf_bm"):
+                                print(f"  [{mode_name}] {name}=...{value[-20:]}")
+                    if "cf_clearance" in new_cookies or new_cookies:
+                        if "cf_clearance" in new_cookies:
+                            print(f"  [{mode_name}] Got cf_clearance!")
+                        return new_cookies
+        except Exception as e:
+            print(f"  [{mode_name}] StealthySession failed: {e}")
+
+        # Strategy B: DynamicSession (context manager, less stealth)
+        if not new_cookies:
+            try:
+                print(f"  [{mode_name}] Trying DynamicSession...")
+                with DynamicSession(**kwargs) as session:
+                    resp = session.fetch("https://chaturbate.com", timeout=90)
+                    status = getattr(resp, "status", "?")
+                    body = getattr(resp, "text", "") or ""
+                    if "verify your age" in body.lower():
+                        print(f"  [{mode_name}] Age verification detected")
+                        continue
+
+                    context = getattr(session, "context", None)
+                    if context is not None:
                         pw_cookies = context.cookies()
                         print(f"  [{mode_name}] Got {len(pw_cookies)} cookies from Playwright")
-
-                        new_cookies = {}
                         for c in pw_cookies:
                             name = c.get("name", "")
                             value = c.get("value", "")
                             if name and value:
                                 new_cookies[name] = value
-                                if name in ("cf_clearance", "sessionid", "csrftoken", "__cf_bm"):
-                                    print(f"  [{mode_name}] {name}=...{value[-20:]}")
+                        if "cf_clearance" in new_cookies or new_cookies:
+                            return new_cookies
+            except Exception as e:
+                print(f"  [{mode_name}] DynamicSession failed: {e}")
 
-                        if "cf_clearance" in new_cookies:
-                            print(f"  [{mode_name}] Got cf_clearance!")
-                            return new_cookies
-                        if new_cookies:
-                            print(f"  [{mode_name}] Got {len(new_cookies)} cookies but no cf_clearance")
-                            return new_cookies
-                    except Exception as e:
-                        print(f"  [{mode_name}] Cookie extraction error: {e}")
+        # Strategy C: StealthyFetcher class API (configure + fetch)
+        if not new_cookies:
+            try:
+                print(f"  [{mode_name}] Trying StealthyFetcher.configure()...")
+                StealthyFetcher.configure(**kwargs)
+                resp = StealthyFetcher.fetch("https://chaturbate.com", timeout=90)
+                status = getattr(resp, "status", "?")
+                body = getattr(resp, "text", "") or ""
+                if "verify your age" in body.lower():
+                    print(f"  [{mode_name}] Age verification detected")
+                    continue
+
+                context = getattr(StealthyFetcher, "context", None)
+                if context is not None:
+                    pw_cookies = context.cookies()
+                    print(f"  [{mode_name}] Got {len(pw_cookies)} cookies from Playwright")
+                    for c in pw_cookies:
+                        name = c.get("name", "")
+                        value = c.get("value", "")
+                        if name and value:
+                            new_cookies[name] = value
+                    if "cf_clearance" in new_cookies or new_cookies:
+                        return new_cookies
                 else:
-                    print(f"  [{mode_name}] No Playwright context available")
-        except Exception as e:
-            print(f"  [{mode_name}] Scrapling failed: {e}")
-            continue
+                    print(f"  [{mode_name}] No context on StealthyFetcher, trying session attribute...")
+                    session = getattr(StealthyFetcher, "session", None)
+                    if session:
+                        ctx = getattr(session, "context", None)
+                        if ctx:
+                            pw_cookies = ctx.cookies()
+                            for c in pw_cookies:
+                                name = c.get("name", "")
+                                value = c.get("value", "")
+                                if name and value:
+                                    new_cookies[name] = value
+                            if "cf_clearance" in new_cookies or new_cookies:
+                                return new_cookies
+            except Exception as e:
+                print(f"  [{mode_name}] StealthyFetcher failed: {e}")
 
-    print("  [INFO] No cookies from Scrapling (both direct and proxy failed)")
+        if new_cookies:
+            return new_cookies
+
+    print("  [INFO] No cookies from Scrapling (all strategies failed)")
     return {}
 
 
