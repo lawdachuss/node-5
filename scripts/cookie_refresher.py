@@ -94,11 +94,19 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         print("  [INFO] curl_cffi not available")
         return {}
 
+    # Build proxy dict once — curl_cffi needs socks5h:// for DNS through proxy
+    proxies = None
+    if proxy:
+        if proxy.startswith("socks5://"):
+            proxy_h = proxy.replace("socks5://", "socks5h://", 1)
+        else:
+            proxy_h = proxy
+        proxies = {"https": proxy_h, "http": proxy_h}
+        print(f"  Using proxy: {proxy}")
+
     print("  Trying curl_cffi (browser TLS impersonation)...")
 
     # Try the latest Chrome versions that curl_cffi supports.
-    # Must match httpcloak's "chrome-146-windows" fingerprint as closely as
-    # possible so cf_clearance works with the DVR's TLS transport.
     CHROME_VERSIONS = ["chrome131", "chrome130", "chrome128", "chrome126", "chrome124"]
     session_cookies = {}
 
@@ -126,26 +134,14 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
                 print(f"  {impersonate} not supported by this curl_cffi version, trying next...")
                 continue
             print(f"  [WARN] {impersonate} failed: {e}")
-            # Only try next version for "not supported" errors
             if "not supported" in err_msg.lower() or "unknown" in err_msg.lower():
                 continue
-            # Other errors (network, timeout) — stop trying
             break
     else:
         print("  [WARN] No supported Chrome impersonation version found")
         return {}
 
-    # Extract cookies from the response
-    if hasattr(resp, "cookies"):
-        # curl_cffi uses socks5h:// for DNS resolution through proxy
-        if proxy.startswith("socks5://"):
-            proxy_h = proxy.replace("socks5://", "socks5h://", 1)
-        else:
-            proxy_h = proxy
-        proxies = {"https": proxy_h, "http": proxy_h}
-        print(f"  Using proxy: {proxy}")
-
-    # First: visit chaturbate.com to get initial cookies
+    # Visit chaturbate.com to get initial cookies
     try:
         resp = cffi_requests.get(
             "https://chaturbate.com",
@@ -157,13 +153,11 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         )
         print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
 
-        # Extract cookies from response
         if hasattr(resp, "cookies"):
             for name, value in resp.cookies.items():
                 session_cookies[name] = value
                 print(f"    Cookie: {name}={value[:30]}...")
 
-        # Also check Set-Cookie headers directly
         if hasattr(resp, "headers"):
             for header_val in resp.headers.get_list("set-cookie"):
                 if "=" in header_val:
