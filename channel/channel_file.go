@@ -249,7 +249,14 @@ func (ch *Channel) processPendingMuxPair(videoPath, audioPath string, skipMinDur
 	}
 
 	// Both tracks exist — mux them together.
-	finalOutput := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".muxed.mp4"
+	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
+	if base == "" || strings.HasSuffix(base, ".") || strings.HasPrefix(base, ".") {
+		ch.Error("mux: refusing to mux degenerate videoPath=%q; removing sidecars", videoPath)
+		os.Remove(videoPath)
+		os.Remove(audioPath)
+		return
+	}
+	finalOutput := base + ".muxed.mp4"
 	if err := ch.MuxAV(videoPath, audioPath, finalOutput); err != nil {
 		ch.Info("mux: ffmpeg mux failed, trying native fallback: %s", err.Error())
 		if nativeErr := ch.MuxAVNative(videoPath, audioPath, finalOutput); nativeErr != nil {
@@ -525,7 +532,11 @@ func (ch *Channel) GenerateFilename() (string, error) {
 	if err := tpl.Execute(&buf, pattern); err != nil {
 		return "", fmt.Errorf("template execution error: %w", err)
 	}
-	return buf.String(), nil
+	result := buf.String()
+	if result == "" {
+		return "", fmt.Errorf("GenerateFilename: pattern=%q produced empty filename", ch.Config.Pattern)
+	}
+	return result, nil
 }
 
 // CreateNewFile creates a new file for the channel using the given filename

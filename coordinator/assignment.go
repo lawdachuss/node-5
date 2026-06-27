@@ -256,7 +256,7 @@ func (c *Coordinator) DeleteChannelAssignment(username, site string) error {
 
 // ConfigFromAssignment converts a ChannelAssignment back to a ChannelConfig.
 func ConfigFromAssignment(ca *database.ChannelAssignment) *entity.ChannelConfig {
-	return &entity.ChannelConfig{
+	conf := &entity.ChannelConfig{
 		Site:                    ca.Site,
 		Username:                ca.Username,
 		Framerate:               ca.Framerate,
@@ -268,6 +268,8 @@ func ConfigFromAssignment(ca *database.ChannelAssignment) *entity.ChannelConfig 
 		MinDurationBeforeUpload: ca.MinDurationBeforeUpload,
 		CreatedAt:               time.Now().Unix(),
 	}
+	conf.Sanitize()
+	return conf
 }
 
 // MarshalPool marshals a slice of ChannelConfig into JSON bytes.

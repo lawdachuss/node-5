@@ -1523,6 +1523,7 @@ func AddToPool(c *gin.Context) {
 		Status:     "unassigned",
 		Resolution: req.Resolution,
 		Framerate:  req.Framerate,
+		Pattern:    "videos/{{.Username}}_{{.Year}}-{{.Month}}-{{.Day}}_{{.Hour}}-{{.Minute}}-{{.Second}}{{if .Sequence}}_{{.Sequence}}{{end}}",
 	}
 
 	if err := client.BulkInsertAssignments([]database.ChannelAssignment{assignment}); err != nil {

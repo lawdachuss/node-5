@@ -632,6 +632,9 @@ func SaveRecordingWithLinks(username, filename, timestamp, roomTitle string, tag
 	if client == nil {
 		return fmt.Errorf("Supabase not configured")
 	}
+	if filename == "" || strings.HasPrefix(filename, ".") {
+		return fmt.Errorf("refusing to save recording with degenerate filename: %q", filename)
+	}
 
 	// Look up channel ID for foreign key
 	rec := &database.Recording{

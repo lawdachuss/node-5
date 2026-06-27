@@ -290,6 +290,18 @@ func isCloudflareChallenge(body []byte, headers map[string][]string, statusCode 
 	return false
 }
 
+// isAgeVerification checks if the response body indicates Chaturbate's age
+// verification / face ID page. When detected the proxy should be rotated —
+// the current SOCKS5 proxy IP originates from a restricted region (US, UK,
+// FR, DE, AU, etc.) that triggers Chaturbate's identity verification.
+func isAgeVerification(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	// "Verify your age" is the title/message on Chaturbate's age check page
+	return strings.Contains(strings.ToLower(string(body)), "verify your age")
+}
+
 // cdnHostSuffixes lists CDN hostname suffixes that serve HLS segments
 // with signed URLs (pkey/token). These hosts are directly reachable from
 // any region — the proxy is only needed for geo-unblocking API requests
@@ -459,6 +471,19 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 				return nil, fmt.Errorf("cloudflare challenge, no more proxies to try")
 			}
 
+			// Detect Chaturbate age verification page and rotate proxy.
+			// A proxy with a flagged IP (e.g. US/UK/FR/DE) returns the
+			// verification page instead of the real API — rotate to the
+			// next proxy in the pool.
+			if isAgeVerification(body) {
+				cloakResp.Close()
+				log.Printf("[proxy] age verification detected on proxy %d/%d, rotating", attempt+1, max(1, proxyCount))
+				if t.rotateProxy() {
+					continue
+				}
+				return nil, fmt.Errorf("age verification, no more proxies to try")
+			}
+
 			resp := &http.Response{
 				StatusCode: cloakResp.StatusCode,
 				Header:     make(http.Header),
@@ -602,6 +627,24 @@ func (t *httpcloakTransport) fetchProxiesFrom(refreshURL string) bool {
 	password := strings.TrimSpace(server.Config.ProxyPassword)
 	for i, p := range newProxies {
 		newProxies[i] = applyProxyAuth(p, username, password)
+	}
+
+	// Prepend the configured proxy URL (from PROXY_URL / ALL_PROXY / CLI flag)
+	// so it is tried first — the workflow's carefully-tested proxy takes priority
+	// over the unverified proxyscrape crawl results.
+	configuredProxy := strings.TrimSpace(server.Config.ProxyURL)
+	if configuredProxy != "" {
+		configuredProxy = applyProxyAuth(configuredProxy, username, password)
+		exists := false
+		for _, p := range newProxies {
+			if p == configuredProxy {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			newProxies = append([]string{configuredProxy}, newProxies...)
+		}
 	}
 
 	// Update the transport with the new proxy list

@@ -305,6 +305,9 @@ type Recording struct {
 // SaveRecording creates or updates a recording using Supabase's upsert functionality.
 // Uses on_conflict to atomically upsert by filename, avoiding TOCTOU race conditions.
 func (c *Client) SaveRecording(rec *Recording) error {
+	if rec.Filename == "" || strings.HasPrefix(rec.Filename, ".") {
+		return fmt.Errorf("refusing to save recording with degenerate filename: %q", rec.Filename)
+	}
 	resp, err := c.requestWithRetry("POST", "/recordings?on_conflict=filename", rec)
 	if err != nil {
 		return err
