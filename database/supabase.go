@@ -758,7 +758,7 @@ func (c *Client) UpsertNode(node *Node) error {
 // HeartbeatNode updates the last_heartbeat timestamp and current load for a node.
 func (c *Client) HeartbeatNode(nodeID string, currentLoad int) error {
 	return c.patch(fmt.Sprintf("/nodes?node_id=eq.%s", url.QueryEscape(nodeID)), map[string]interface{}{
-		"last_heartbeat": time.Now().UTC().Format(time.RFC3339),
+		"last_heartbeat": "now()",
 		"current_load":   currentLoad,
 	})
 }
