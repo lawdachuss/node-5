@@ -453,28 +453,51 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] Scrapling installed, installing Chromium browser..."
             $chromiumOk = $false
-            $hosts = @("https://playwright.azureedge.net", "https://cdn.playwright.dev")
-            foreach ($dh in $hosts) {
-              for ($retry = 0; $retry -lt 3; $retry++) {
-                Write-Host "  Download attempt $($retry+1)/3 from $dh"
+            # Strategy 1: Try Playwright CDN with retries (503 is often transient)
+            foreach ($dh in @("https://playwright.azureedge.net", "https://cdn.playwright.dev")) {
+              foreach ($wait in @(10, 20)) {
                 $env:PLAYWRIGHT_DOWNLOAD_HOST = $dh
+                Write-Host "  Downloading Chromium from $dh (retry after ${wait}s)..."
                 python -m playwright install chromium 2>&1
                 if ($LASTEXITCODE -eq 0) { $chromiumOk = $true; break }
-                Write-Host "  Download failed, waiting 15s before retry..."
-                Start-Sleep -Seconds 15
+                Start-Sleep -Seconds $wait
               }
               if ($chromiumOk) { break }
             }
             Remove-Item Env:PLAYWRIGHT_DOWNLOAD_HOST -ErrorAction SilentlyContinue
-            if ($chromiumOk) {
-              Write-Host "[OK] Chromium installed for Scrapling"
-            } else {
-              Write-Warning "Chromium install failed after all retries and mirrors"
-              Write-Host "  Trying python -m playwright install --with-deps chromium..."
-              python -m playwright install --with-deps chromium 2>&1
-              if ($LASTEXITCODE -eq 0) { $chromiumOk = $true; Write-Host "[OK] Chromium installed with deps" }
+            # Strategy 2: Try system Chrome via channel (windows-latest has Chrome pre-installed)
+            if (-not $chromiumOk) {
+              $chromePaths = @(
+                "C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+              )
+              $found = $null
+              foreach ($cp in $chromePaths) { if (Test-Path $cp) { $found = $cp; break } }
+              if ($found) {
+                Write-Host "  Found system Chrome at $found - using channel='chrome'"
+                $env:SCRAPLING_CHANNEL = "chrome"
+                $chromiumOk = $true
+              } else {
+                Write-Host "  Chrome not found, trying Microsoft Edge..."
+                $edgePaths = @(
+                  "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                  "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+                )
+                foreach ($ep in $edgePaths) { if (Test-Path $ep) { $found = $ep; break } }
+                if ($found) {
+                  Write-Host "  Found Edge at $found - using channel='msedge'"
+                  $env:SCRAPLING_CHANNEL = "msedge"
+                  $chromiumOk = $true
+                }
+              }
             }
-            if (-not $chromiumOk) { Write-Warning "All Chromium install attempts failed"; $skipRefresh = $true }
+            if (-not $chromiumOk) {
+              Write-Warning "No Chromium browser available anywhere, skipping cookie refresh"
+              $skipRefresh = $true
+            } else {
+              Write-Host "[OK] Chromium ready for Scrapling"
+            }
           } else {
             Write-Warning "Scrapling install failed, skipping cookie refresh"
             $skipRefresh = $true

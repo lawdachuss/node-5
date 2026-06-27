@@ -106,6 +106,8 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
 
     print(f"  Using {cls_name} (Playwright-based stealth browser)...")
 
+    channel = os.environ.get("SCRAPLING_CHANNEL", "")
+
     for mode_name, mode_proxy in [("direct", None), ("proxy", proxy)]:
         if mode_name == "proxy" and not proxy:
             continue
@@ -115,12 +117,13 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
         if mode_proxy:
             pw_proxy = mode_proxy.replace("socks5h://", "socks5://", 1)
 
+        kwargs = dict(headless=True, solve_cloudflare=True, proxy=pw_proxy)
+        if channel:
+            kwargs["channel"] = channel
+            print(f"  [{mode_name}] Using browser channel: {channel}")
+
         try:
-            with _Fetcher(
-                headless=True,
-                solve_cloudflare=True,
-                proxy=pw_proxy,
-            ) as fetcher:
+            with _Fetcher(**kwargs) as fetcher:
                 session = fetcher.session
                 print(f"  [{mode_name}] Browser launched, navigating to chaturbate.com...")
 
