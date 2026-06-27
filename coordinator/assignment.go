@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"log"
 	"math"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 )
 
 // StartClaimLoop periodically claims channels for this node based on fair-share.
-// Runs every 60 seconds until the context is cancelled or Stop() is called.
+// Runs every ~60 seconds (with ±10s random jitter per cycle) until the context
+// is cancelled or Stop() is called.  The per-cycle jitter prevents persistent
+// phase alignment that could starve some nodes while others always claim first.
 func (c *Coordinator) StartClaimLoop(ctx context.Context) {
 	if !c.IsPooled() || c.Client == nil {
 		return
@@ -32,16 +35,26 @@ func (c *Coordinator) StartClaimLoop(ctx context.Context) {
 		stagger := 5*time.Second + time.Duration(h.Sum32()%10)*time.Second
 		time.Sleep(stagger)
 
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-
 		for {
+			// Use a timer (not a fixed ticker) so we can add ±10s jitter
+			// every cycle.  This prevents persistent phase alignment where
+			// some nodes' claim cycles always fire before others' release
+			// cycles, starving the slower nodes indefinitely.
+			jitter := time.Duration(rand.Intn(21)-10) * time.Second
+			interval := 60*time.Second + jitter
+			if interval <= 0 {
+				interval = 60 * time.Second
+			}
+			timer := time.NewTimer(interval)
+
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
 			case <-c.stopCh:
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				c.runClaimCycle()
 			}
 		}
@@ -133,8 +146,8 @@ func (c *Coordinator) runClaimCycle() {
 					c.Manager.RemoveChannelForReassignment(ca.Username)
 				}
 			}
+			myLoad -= len(released)
 		}
-		return // let next cycle do the claiming to avoid races
 	}
 
 	// Claim channels if we have fewer than our fair share

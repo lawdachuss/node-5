@@ -758,7 +758,7 @@ func (c *Client) UpsertNode(node *Node) error {
 // HeartbeatNode updates the last_heartbeat timestamp and current load for a node.
 func (c *Client) HeartbeatNode(nodeID string, currentLoad int) error {
 	return c.patch(fmt.Sprintf("/nodes?node_id=eq.%s", url.QueryEscape(nodeID)), map[string]interface{}{
-		"last_heartbeat": "now()",
+		"last_heartbeat": time.Now().UTC().Format(time.RFC3339),
 		"current_load":   currentLoad,
 	})
 }
@@ -1177,6 +1177,24 @@ func (c *Client) SetChannelsNotLive(nodeID string, usernames []string) error {
 	}
 	return c.patch(
 		fmt.Sprintf("/channel_assignments?username=not.in.(%s)&assigned_node=eq.%s&is_live=eq.true",
+			joinEscaped(usernames), url.QueryEscape(nodeID)),
+		map[string]interface{}{
+			"is_live":         false,
+			"live_checked_at": now,
+		})
+}
+
+// SetChannelsNotLiveByUsername sets is_live=false for the specified usernames
+// on this node. Unlike SetChannelsNotLive, this directly targets the listed
+// usernames rather than using set-difference. Used when only a subset of
+// channels were successfully checked by the liveness check.
+func (c *Client) SetChannelsNotLiveByUsername(nodeID string, usernames []string) error {
+	if len(usernames) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	return c.patch(
+		fmt.Sprintf("/channel_assignments?username=in.(%s)&assigned_node=eq.%s&is_live=eq.true",
 			joinEscaped(usernames), url.QueryEscape(nodeID)),
 		map[string]interface{}{
 			"is_live":         false,

@@ -47,8 +47,10 @@ type ChannelManager interface {
 
 // LivenessChecker is the interface for checking if a channel is currently live.
 // Implemented by main.go wiring using the site adapters.
+// Returns (live, error). When error is non-nil the caller should treat
+// the status as unknown and NOT update is_live for that channel.
 type LivenessChecker interface {
-	IsLive(ctx context.Context, siteName, username string) bool
+	IsLive(ctx context.Context, siteName, username string) (bool, error)
 }
 
 // Coordinator manages the distributed node lifecycle: registration, heartbeat,

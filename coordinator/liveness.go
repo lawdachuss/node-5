@@ -66,11 +66,20 @@ func (c *Coordinator) runLiveCheck() {
 		return
 	}
 
-	// Check liveness for each channel
-	var liveUsernames []string
+	// Check liveness for each channel.
+	// Separate live, not-live, and failed results so API errors don't
+	// clobber the is_live flag of channels we couldn't check.
+	var liveUsernames, notLiveUsernames []string
 	for _, ca := range assignments {
-		if c.LiveCheck.IsLive(ctx, ca.Site, ca.Username) {
+		live, err := c.LiveCheck.IsLive(ctx, ca.Site, ca.Username)
+		if err != nil {
+			log.Printf("[coordinator] live check: failed for %s/%s: %v", ca.Site, ca.Username, err)
+			continue
+		}
+		if live {
 			liveUsernames = append(liveUsernames, ca.Username)
+		} else {
+			notLiveUsernames = append(notLiveUsernames, ca.Username)
 		}
 	}
 
@@ -80,12 +89,10 @@ func (c *Coordinator) runLiveCheck() {
 		if err := c.Client.SetChannelsLive(c.NodeID, liveUsernames); err != nil {
 			log.Printf("[coordinator] live check: set live error: %v", err)
 		}
-		if err := c.Client.SetChannelsNotLive(c.NodeID, liveUsernames); err != nil {
+	}
+	if len(notLiveUsernames) > 0 {
+		if err := c.Client.SetChannelsNotLiveByUsername(c.NodeID, notLiveUsernames); err != nil {
 			log.Printf("[coordinator] live check: set not live error: %v", err)
-		}
-	} else {
-		if err := c.Client.SetChannelsNotLive(c.NodeID, []string{}); err != nil {
-			log.Printf("[coordinator] live check: set all not live error: %v", err)
 		}
 	}
 }
