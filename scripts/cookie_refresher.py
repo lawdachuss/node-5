@@ -117,6 +117,24 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
 
         new_cookies = {}
 
+        def _extract_ua(sess):
+            try:
+                ctx = getattr(sess, "context", None)
+                if ctx:
+                    pages = ctx.pages
+                    if pages:
+                        ua = pages[0].evaluate("navigator.userAgent")
+                        if ua:
+                            return ua
+                page = getattr(sess, "_page", None)
+                if page:
+                    ua = page.evaluate("navigator.userAgent")
+                    if ua:
+                        return ua
+            except Exception:
+                pass
+            return None
+
         # Strategy A: StealthySession (context manager, full stealth)
         try:
             print(f"  [{mode_name}] Trying StealthySession...")
@@ -129,6 +147,10 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
                 if "verify your age" in body.lower():
                     print(f"  [{mode_name}] Age verification detected")
                     continue
+
+                ua = _extract_ua(session)
+                if ua:
+                    print(f"  [{mode_name}] Browser UA: {ua[:60]}...")
 
                 context = getattr(session, "context", None)
                 if context is not None:
@@ -144,7 +166,7 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
                     if "cf_clearance" in new_cookies or new_cookies:
                         if "cf_clearance" in new_cookies:
                             print(f"  [{mode_name}] Got cf_clearance!")
-                        return new_cookies
+                        return new_cookies, ua
         except Exception as e:
             print(f"  [{mode_name}] StealthySession failed: {e}")
 
@@ -159,6 +181,10 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
                         print(f"  [{mode_name}] Age verification detected")
                         continue
 
+                    ua = _extract_ua(session)
+                    if ua:
+                        print(f"  [{mode_name}] Browser UA: {ua[:60]}...")
+
                     context = getattr(session, "context", None)
                     if context is not None:
                         pw_cookies = context.cookies()
@@ -169,7 +195,7 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
                             if name and value:
                                 new_cookies[name] = value
                         if "cf_clearance" in new_cookies or new_cookies:
-                            return new_cookies
+                            return new_cookies, ua
             except Exception as e:
                 print(f"  [{mode_name}] DynamicSession failed: {e}")
 
@@ -183,10 +209,12 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
                     print(f"  [{mode_name}] Age verification detected")
                     continue
 
-                # Try to get Playwright context from StealthyFetcher after fetch
-                # The last session might be stored on the class
                 session = getattr(StealthyFetcher, "session", None)
                 if session:
+                    ua = _extract_ua(session)
+                    if ua:
+                        print(f"  [{mode_name}] Browser UA: {ua[:60]}...")
+
                     ctx = getattr(session, "context", None)
                     if ctx:
                         pw_cookies = ctx.cookies()
@@ -197,15 +225,15 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
                             if name and value:
                                 new_cookies[name] = value
                         if "cf_clearance" in new_cookies or new_cookies:
-                            return new_cookies
+                            return new_cookies, ua
             except Exception as e:
                 print(f"  [{mode_name}] StealthyFetcher.fetch() failed: {e}")
 
         if new_cookies:
-            return new_cookies
+            return new_cookies, None
 
     print("  [INFO] No cookies from Scrapling (all strategies failed)")
-    return {}
+    return {}, None
 
 
 def save_to_supabase(rest, api_key, value, settings_key="dvr_settings", is_seed=False):
@@ -331,7 +359,10 @@ def main():
     # --- Try to refresh cookies ---
     print("\n[2/3] Refreshing cookies...")
 
-    new_cookies = try_refresh_with_scrapling(user_agent, proxy)
+    new_cookies, browser_ua = try_refresh_with_scrapling(user_agent, proxy)
+    if browser_ua:
+        user_agent = browser_ua
+        print(f"  Browser reported UA: {user_agent}")
 
     # --- Merge and save ---
     print("\n[3/3] Merging cookies...")
@@ -385,7 +416,6 @@ def main():
         save_to_supabase(rest, supabase_key, settings_value, settings_key=settings_key)
         print("\n[OK] Cookies refreshed successfully")
     else:
-        # Still save if we removed stale cf_clearance even without a fresh one
         old_cf = old.get("cf_clearance", "")
         new_cf = merged.get("cf_clearance", "")
         if old_cf != new_cf or new_cookie_str != cookie_str:
