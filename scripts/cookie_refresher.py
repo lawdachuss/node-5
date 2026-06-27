@@ -319,14 +319,13 @@ def main():
         else:
             print(f"  [WARN] No new cf_clearance from curl_cffi — refresh may have been blocked")
     else:
-        print("  [WARN] Cookie refresh failed — removing stale cf_clearance (IP-mismatched)")
-        # Remove stale cf_clearance so the DVR doesn't use an IP-bound cookie
-        # from a different proxy. Without cf_clearance, Cloudflare evaluates
-        # requests based on TLS fingerprint + IP reputation — clean proxies
-        # will pass, flagged ones will be rotated by the transport.
-        merged.pop("cf_clearance", None)
-        merged.pop("__cf_bm", None)
-        merged.pop("__cfruid", None)
+        print("  [INFO] Cookie refresh failed — keeping existing cf_clearance")
+        # Keep the existing cf_clearance even if stale. Without ANY clearance
+        # the DVR cannot bootstrap a new one because ALL proxy requests get
+        # Cloudflare-challenged before they reach the Set-Cookie handler.
+        # A stale clearance from a different proxy IP is still better than
+        # none — the httpcloak transport will rotate on challenge, and when
+        # it finds a clean proxy Cloudflare will issue a fresh clearance.
 
     print(f"  Total cookies: {len(merged)}")
     print(f"  sessionid: {'[OK]' if 'sessionid' in merged else '[NO]'}")
