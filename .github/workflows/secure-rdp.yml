@@ -129,13 +129,17 @@ jobs:
           $allProxies += Fetch-Proxies "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl,ca,in,jp,kr,sg,my,ph,id,th,vn,br,ar,cl,co,mx,za,ng,ke,ma,tn"
           log "  Got $($allProxies.Count) safe-region proxies"
 
-          # Source 2: ProxyScrape API - all-region SOCKS5 (broad fallback)
-          log "Fetching all-region proxies from ProxyScrape API..."
-          $allProxies += Fetch-Proxies "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5"
-          
-          # Remove duplicates
-          $allProxies = $allProxies | Select-Object -Unique
-          log "Total unique proxies to test: $($allProxies.Count)"
+          # Only fetch all-region fallback if safe-region pool is thin (< 30).
+          # The all-region list is ~2000 proxies, 95% from US/UK/FR/DE/AU which
+          # fail age verification — testing all of them wastes 5+ minutes.
+          if ($allProxies.Count -lt 30) {
+            log "Safe-region pool thin, fetching all-region fallback..."
+            $allProxies += Fetch-Proxies "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5"
+            $allProxies = $allProxies | Select-Object -Unique
+            log "  Total with fallback: $($allProxies.Count) proxies"
+          } else {
+            log "  Safe-region pool sufficient, skipping all-region fallback"
+          }
 
           if ($allProxies.Count -eq 0) {
             log "WARNING: No proxies fetched from APIs. Using emergency fallback list."
