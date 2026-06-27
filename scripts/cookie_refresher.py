@@ -18,6 +18,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# Playwright timeout is in milliseconds (not seconds)
+_PW_TIMEOUT = 120_000  # 2 minutes per page load
+
 
 def load_dotenv(path=".env"):
     p = Path(path)
@@ -118,14 +121,13 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
         try:
             print(f"  [{mode_name}] Trying StealthySession...")
             with StealthySession(**kwargs) as session:
-                resp = session.fetch("https://chaturbate.com", timeout=90)
+                resp = session.fetch("https://chaturbate.com", timeout=_PW_TIMEOUT)
                 status = getattr(resp, "status", "?")
                 print(f"  [{mode_name}] Page status: {status}")
 
                 body = getattr(resp, "text", "") or ""
                 if "verify your age" in body.lower():
                     print(f"  [{mode_name}] Age verification detected")
-                    StealthySession = None
                     continue
 
                 context = getattr(session, "context", None)
@@ -151,8 +153,7 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
             try:
                 print(f"  [{mode_name}] Trying DynamicSession...")
                 with DynamicSession(**kwargs) as session:
-                    resp = session.fetch("https://chaturbate.com", timeout=90)
-                    status = getattr(resp, "status", "?")
+                    resp = session.fetch("https://chaturbate.com", timeout=_PW_TIMEOUT)
                     body = getattr(resp, "text", "") or ""
                     if "verify your age" in body.lower():
                         print(f"  [{mode_name}] Age verification detected")
@@ -172,45 +173,33 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
             except Exception as e:
                 print(f"  [{mode_name}] DynamicSession failed: {e}")
 
-        # Strategy C: StealthyFetcher class API (configure + fetch)
+        # Strategy C: StealthyFetcher static fetch (one-shot, args passed to fetch())
         if not new_cookies:
             try:
-                print(f"  [{mode_name}] Trying StealthyFetcher.configure()...")
-                StealthyFetcher.configure(**kwargs)
-                resp = StealthyFetcher.fetch("https://chaturbate.com", timeout=90)
-                status = getattr(resp, "status", "?")
+                print(f"  [{mode_name}] Trying StealthyFetcher.fetch()...")
+                resp = StealthyFetcher.fetch("https://chaturbate.com", timeout=_PW_TIMEOUT, **kwargs)
                 body = getattr(resp, "text", "") or ""
                 if "verify your age" in body.lower():
                     print(f"  [{mode_name}] Age verification detected")
                     continue
 
-                context = getattr(StealthyFetcher, "context", None)
-                if context is not None:
-                    pw_cookies = context.cookies()
-                    print(f"  [{mode_name}] Got {len(pw_cookies)} cookies from Playwright")
-                    for c in pw_cookies:
-                        name = c.get("name", "")
-                        value = c.get("value", "")
-                        if name and value:
-                            new_cookies[name] = value
-                    if "cf_clearance" in new_cookies or new_cookies:
-                        return new_cookies
-                else:
-                    print(f"  [{mode_name}] No context on StealthyFetcher, trying session attribute...")
-                    session = getattr(StealthyFetcher, "session", None)
-                    if session:
-                        ctx = getattr(session, "context", None)
-                        if ctx:
-                            pw_cookies = ctx.cookies()
-                            for c in pw_cookies:
-                                name = c.get("name", "")
-                                value = c.get("value", "")
-                                if name and value:
-                                    new_cookies[name] = value
-                            if "cf_clearance" in new_cookies or new_cookies:
-                                return new_cookies
+                # Try to get Playwright context from StealthyFetcher after fetch
+                # The last session might be stored on the class
+                session = getattr(StealthyFetcher, "session", None)
+                if session:
+                    ctx = getattr(session, "context", None)
+                    if ctx:
+                        pw_cookies = ctx.cookies()
+                        print(f"  [{mode_name}] Got {len(pw_cookies)} cookies from Playwright (Fetcher.session)")
+                        for c in pw_cookies:
+                            name = c.get("name", "")
+                            value = c.get("value", "")
+                            if name and value:
+                                new_cookies[name] = value
+                        if "cf_clearance" in new_cookies or new_cookies:
+                            return new_cookies
             except Exception as e:
-                print(f"  [{mode_name}] StealthyFetcher failed: {e}")
+                print(f"  [{mode_name}] StealthyFetcher.fetch() failed: {e}")
 
         if new_cookies:
             return new_cookies
