@@ -27,7 +27,7 @@ jobs:
           $repoName = ($env:GITHUB_REPOSITORY -split '/')[1]
           echo "REPO_DIR=D:\repos\$repoName" >> $env:GITHUB_ENV
           echo "REPO_NAME=$repoName" >> $env:GITHUB_ENV
-          Write-Host "GITHUB_REPOSITORY=$env:GITHUB_REPOSITORY → REPO_DIR=D:\repos\$repoName"
+          Write-Host "GITHUB_REPOSITORY=$env:GITHUB_REPOSITORY -> REPO_DIR=D:\repos\$repoName"
 
       - name: Record Start Time and Enforce Timing Rules
         shell: powershell
@@ -440,9 +440,9 @@ jobs:
           $repoDir = $env:REPO_DIR
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found"; exit 1 }
 
-          # .env is already written by the "Refresh Chaturbate Cookies" step.
+          # .env is already written by the cookie refresher step.
           # The cookie refresher updated it with fresh Chrome-146-bound cookies.
-          # DO NOT overwrite it with MINI_ENV here — that would destroy the
+          # DO NOT overwrite it with MINI_ENV here - that would destroy the
           # refreshed cookies and cause Cloudflare TLS fingerprint mismatches.
           if (-not (Test-Path "$repoDir\.env")) {
             if ([string]::IsNullOrWhiteSpace($env:MINI_ENV)) {
@@ -454,7 +454,7 @@ jobs:
             Write-Host "[WARN] Wrote .env from MINI_ENV secret (cookie refresher did not run)"
           } else {
             $envSize = (Get-Item "$repoDir\.env").Length
-            Write-Host "[OK] .env already exists from cookie refresher ($envSize bytes) — preserving refreshed cookies"
+            Write-Host "[OK] .env already exists from cookie refresher -" $envSize "bytes"
           }
 
           Set-Location $repoDir
@@ -475,7 +475,7 @@ jobs:
           $dvrExe = "$repoDir\chaturbate-dvr.exe"
           if (-not (Test-Path $dvrExe)) { Write-Error "Binary not found: $dvrExe"; exit 1 }
           $dvrSize = (Get-Item $dvrExe).Length
-          Write-Host "[OK] Binary exists at $dvrExe ($dvrSize bytes)"
+          Write-Host "[OK] Binary exists at $dvrExe -" $dvrSize "bytes"
 
           Write-Host "=== Binary validation ==="
           $v = & $dvrExe --version 2>&1
@@ -606,7 +606,7 @@ jobs:
                   $downloadSuccess = $true
                   break
                 } else {
-                  Write-Warning "Downloaded file is too small ($size bytes), retrying..."
+                  Write-Warning "Downloaded file is too small -" $size "bytes, retrying..."
                   Remove-Item $cloudflaredPath -Force -ErrorAction SilentlyContinue
                 }
               }
@@ -865,7 +865,7 @@ jobs:
           # Verify .env exists before starting DVR
           if (Test-Path "$repoDir\.env") {
             $envSize = (Get-Item "$repoDir\.env").Length
-            Write-Host "[OK] .env file found ($envSize bytes)"
+            Write-Host "[OK] .env file found -" $envSize "bytes"
           } else {
             Write-Warning ".env file NOT found at $repoDir\.env"
           }
@@ -1070,7 +1070,7 @@ jobs:
                   $tunnelUrl = $urlMatch.Value
                   $tunnelUrl | Set-Content -Path $tunnelUrlFile -Force
                   Write-Host "[OK] New tunnel URL: $tunnelUrl"
-                  # URL changed on reconnect — re-report so admin panel stays current
+                  # URL changed on reconnect - re-report so admin panel stays current
                   Report-TunnelUrl $tunnelUrl
                 }
               }
