@@ -25,17 +25,18 @@ import (
 // Region selection avoids countries where Chaturbate enforces age/face ID
 // verification. As of 2026, these include 26 US states (TX, LA, UT, VA, FL,
 // NC, etc.), France, Germany, Italy, the UK, and Australia. Safe regions
-// include Netherlands (NL), Canada (CA), India (IN), and most of Asia/SA.
+// include Netherlands (NL), Canada (CA), India (IN), Japan (JP), SE Asia,
+// Brazil (BR), Argentina (AR), Mexico (MX), and South Africa (ZA).
 //
 // Priority:
-//  1. NL + CA + IN — proven safe, no age verification required
-//  2. All-region fallback — broader pool; age verification is detected at
-//     the HTTP response level (ErrAgeVerification) regardless of proxy region
+//  1. Safe-region filtered via ProxyScrape API
+//  2. All-region fallback via raw.githubusercontent.com; age verification is
+//     still detected at the HTTP response level and triggers proxy rotation
 //
 // Sources: ProxyScrape free proxy lists.
 var defaultProxyRefreshURLs = []string{
-	"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl,ca,in",
-	"https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/socks5/data.txt",
+	"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl,ca,in,jp,kr,sg,my,ph,id,th,vn,br,ar,cl,co,mx,za,ng,ke,ma,tn",
+	"https://raw.githubusercontent.com/proxyscrape/free-proxy-list/main/proxies/socks5/data.txt",
 }
 
 // httpcloakTransport wraps httpcloak.Client as an http.RoundTripper.
