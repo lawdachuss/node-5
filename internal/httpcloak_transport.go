@@ -543,6 +543,7 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 // extractCfClearance checks httpcloak response headers for a cf_clearance
 // Set-Cookie and updates server.Config so subsequent API requests include it.
+// Persists to Supabase so the clearance survives process restarts.
 func (t *httpcloakTransport) extractCfClearance(cloakResp *httpcloak.Response) {
 	if cloakResp.Headers == nil {
 		return
@@ -567,7 +568,8 @@ func (t *httpcloakTransport) extractCfClearance(cloakResp *httpcloak.Response) {
 	}
 
 	server.ConfigMu.Lock()
-	if newClearance != "" && newClearance != server.Config.CfClearance {
+	changed := newClearance != "" && newClearance != server.Config.CfClearance
+	if changed {
 		if !strings.Contains(server.Config.Cookies, "cf_clearance=") {
 			server.Config.Cookies = strings.TrimSpace(server.Config.Cookies + "; cf_clearance=" + newClearance)
 		} else {
@@ -578,6 +580,15 @@ func (t *httpcloakTransport) extractCfClearance(cloakResp *httpcloak.Response) {
 		log.Printf("[proxy] captured cf_clearance from Set-Cookie")
 	}
 	server.ConfigMu.Unlock()
+
+	if changed {
+		// Persist to Supabase so the clearance survives restarts.
+		if err := server.SaveSettings(); err != nil {
+			log.Printf("[proxy] failed to persist cf_clearance to Supabase: %v", err)
+		} else {
+			log.Printf("[proxy] persisted cf_clearance to Supabase")
+		}
+	}
 }
 
 // refreshProxies fetches fresh proxy URLs from the configured refresh URL

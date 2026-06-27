@@ -70,16 +70,19 @@ func LoadSettings() error {
 	}
 
 	ConfigMu.Lock()
-	if s.Cookies != "" {
+	// Only overwrite cookies if we don't already have a cf_clearance in memory
+	// (e.g. from extractCfClearance). This prevents periodic reloads from
+	// clobbering a freshly-captured clearance with stale Supabase data.
+	if s.Cookies != "" && Config.CfClearance == "" {
 		Config.Cookies = s.Cookies
 	}
-	if s.SessionID != "" {
+	if s.SessionID != "" && Config.SessionID == "" {
 		Config.SessionID = s.SessionID
 	}
-	if s.Csrftoken != "" {
+	if s.Csrftoken != "" && Config.Csrftoken == "" {
 		Config.Csrftoken = s.Csrftoken
 	}
-	if s.CfClearance != "" {
+	if s.CfClearance != "" && Config.CfClearance == "" {
 		Config.CfClearance = s.CfClearance
 	}
 	if s.UserAgent != "" {

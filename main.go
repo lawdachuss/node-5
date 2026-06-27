@@ -393,6 +393,26 @@ func start(c *cli.Context) error {
 	// Uses PROXY_REFRESH_URL to fetch fresh proxies when all are exhausted.
 	go internal.StartProxyRefresher(context.Background())
 
+	// Periodically reload cookies from Supabase so fresh cookies saved by
+	// the cookie-refresher script (Scrapling/Playwright) get picked up
+	// mid-run without requiring a DVR restart.
+	if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				if err := server.LoadSettings(); err != nil {
+					fmt.Printf("[settings] reload failed: %v\n", err)
+				} else {
+					_ = 0 // suppress unused warning; LoadSettings may no-op
+					// Cookies are only reloaded if CfClearance is empty
+					// (guarded in LoadSettings), so in-memory clearance
+					// captured by extractCfClearance is never overwritten.
+				}
+			}
+		}()
+	}
+
 	server.Manager, err = manager.New()
 	if err != nil {
 		return fmt.Errorf("new manager: %w", err)
