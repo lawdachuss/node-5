@@ -96,8 +96,10 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
 
     print("  Trying curl_cffi (browser TLS impersonation)...")
 
-    impersonate = "chrome131"
+    # Use latest Chrome impersonation to match Cloudflare expectations
+    impersonate = "chrome146"
     session_cookies = {}
+    cffi_session = cffi_requests.Session()
 
     proxies = None
     if proxy:
@@ -109,43 +111,63 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         proxies = {"https": proxy_h, "http": proxy_h}
         print(f"  Using proxy: {proxy}")
 
-    # First: visit chaturbate.com to get initial cookies
-    try:
-        resp = cffi_requests.get(
-            "https://chaturbate.com",
-            impersonate=impersonate,
-            timeout=60,
-            proxies=proxies,
-            headers={"User-Agent": user_agent} if user_agent else None,
-            allow_redirects=True,
-        )
-        print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
+    common_headers = {"User-Agent": user_agent} if user_agent else {}
+    common_headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    common_headers["Accept-Language"] = "en-US,en;q=0.5"
 
-        # Extract cookies from response
-        if hasattr(resp, "cookies"):
-            for name, value in resp.cookies.items():
-                session_cookies[name] = value
-                print(f"    Cookie: {name}={value[:30]}...")
+    # First: visit chaturbate.com — Cloudflare evaluates TLS fingerprint
+    for attempt in range(2):
+        try:
+            resp = cffi_session.get(
+                "https://chaturbate.com",
+                impersonate=impersonate,
+                timeout=60,
+                proxies=proxies,
+                headers=common_headers,
+                allow_redirects=True,
+            )
+            if attempt == 0:
+                print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
+            else:
+                print(f"  Follow-up status: {resp.status_code}")
 
-        # Also check Set-Cookie headers directly
-        if hasattr(resp, "headers"):
-            for header_val in resp.headers.get_list("set-cookie"):
-                if "=" in header_val:
-                    name = header_val.split("=")[0].strip()
-                    value = header_val.split("=", 1)[1].split(";")[0].strip()
-                    if name and value and name not in session_cookies:
-                        session_cookies[name] = value
-                        print(f"    Cookie (header): {name}={value[:30]}...")
+            # Extract cookies — cf_clearance is often set on the second request
+            extract_cookies(resp, session_cookies, prefix="  " if attempt == 0 else "  [follow-up]")
 
-    except Exception as e:
-        print(f"  [WARN] curl_cffi request failed: {e}")
-        return {}
+            # If we have cf_clearance after first request, no need for second
+            if "cf_clearance" in session_cookies:
+                break
+
+        except Exception as e:
+            print(f"  [WARN] curl_cffi request failed (attempt {attempt+1}): {e}")
+            if attempt == 0:
+                continue
+            return {}
 
     if not session_cookies:
         print("  [INFO] No cookies from curl_cffi")
         return {}
 
     return session_cookies
+
+
+def extract_cookies(resp, store, prefix="  "):
+    """Extract cookies from a curl_cffi response into store dict."""
+    if hasattr(resp, "cookies"):
+        for name, value in resp.cookies.items():
+            if name not in store:
+                store[name] = value
+                print(f"{prefix} Cookie: {name}={value[:30]}...")
+
+    # Also check Set-Cookie headers directly
+    if hasattr(resp, "headers"):
+        for header_val in resp.headers.get_list("set-cookie"):
+            if "=" in header_val:
+                name = header_val.split("=")[0].strip()
+                value = header_val.split("=", 1)[1].split(";")[0].strip()
+                if name and value and name not in store:
+                    store[name] = value
+                    print(f"{prefix} Cookie (header): {name}={value[:30]}...")
 
 
 def save_to_supabase(rest, api_key, value, settings_key="dvr_settings", is_seed=False):
