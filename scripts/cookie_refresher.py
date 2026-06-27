@@ -94,9 +94,14 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         print("  [INFO] curl_cffi not available")
         return {}
 
-    # Build proxy dict once — curl_cffi needs socks5h:// for DNS through proxy
+    print("  Trying curl_cffi (browser TLS impersonation)...")
+
+    impersonate = "chrome131"
+    session_cookies = {}
+
     proxies = None
     if proxy:
+        # curl_cffi uses socks5h:// for DNS resolution through proxy
         if proxy.startswith("socks5://"):
             proxy_h = proxy.replace("socks5://", "socks5h://", 1)
         else:
@@ -104,44 +109,7 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         proxies = {"https": proxy_h, "http": proxy_h}
         print(f"  Using proxy: {proxy}")
 
-    print("  Trying curl_cffi (browser TLS impersonation)...")
-
-    # Try the latest Chrome versions that curl_cffi supports.
-    CHROME_VERSIONS = ["chrome131", "chrome130", "chrome128", "chrome126", "chrome124"]
-    session_cookies = {}
-
-    for impersonate in CHROME_VERSIONS:
-        print(f"  Trying {impersonate}...")
-        try:
-            resp = cffi_requests.get(
-                "https://chaturbate.com",
-                impersonate=impersonate,
-                timeout=60,
-                proxies=proxies,
-                headers={"User-Agent": user_agent} if user_agent else None,
-                allow_redirects=True,
-            )
-            print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
-            if resp.status_code == 200:
-                print(f"  [OK] {impersonate} succeeded")
-                break
-            else:
-                print(f"  {impersonate} returned {resp.status_code}, trying next...")
-                continue
-        except Exception as e:
-            err_msg = str(e)
-            if "not supported" in err_msg.lower() or "unknown" in err_msg.lower():
-                print(f"  {impersonate} not supported by this curl_cffi version, trying next...")
-                continue
-            print(f"  [WARN] {impersonate} failed: {e}")
-            if "not supported" in err_msg.lower() or "unknown" in err_msg.lower():
-                continue
-            break
-    else:
-        print("  [WARN] No supported Chrome impersonation version found")
-        return {}
-
-    # Visit chaturbate.com to get initial cookies
+    # First: visit chaturbate.com to get initial cookies
     try:
         resp = cffi_requests.get(
             "https://chaturbate.com",
@@ -153,11 +121,13 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         )
         print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
 
+        # Extract cookies from response
         if hasattr(resp, "cookies"):
             for name, value in resp.cookies.items():
                 session_cookies[name] = value
                 print(f"    Cookie: {name}={value[:30]}...")
 
+        # Also check Set-Cookie headers directly
         if hasattr(resp, "headers"):
             for header_val in resp.headers.get_list("set-cookie"):
                 if "=" in header_val:
@@ -178,8 +148,8 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
     return session_cookies
 
 
-def save_to_supabase(rest, api_key, value, is_seed=False):
-    patch_url = f"{rest}/app_settings?key=eq.dvr_settings"
+def save_to_supabase(rest, api_key, value, settings_key="dvr_settings", is_seed=False):
+    patch_url = f"{rest}/app_settings?key=eq.{settings_key}"
     result = supabase_request("PATCH", patch_url, api_key, {"value": value})
 
     if result is not None and result != []:
@@ -215,13 +185,18 @@ def main():
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     supabase_key = os.environ.get("SUPABASE_API_KEY", "")
     proxy = os.environ.get("ALL_PROXY", "")
+    node_id = os.environ.get("NODE_ID", "")
 
     if not supabase_url or not supabase_key:
         print("  [SKIP] SUPABASE_URL or SUPABASE_API_KEY not set")
         return
 
+    # Per-node cookie keys prevent cf_clearance IP-binding issues across nodes
+    settings_key = f"dvr_settings_{node_id}" if node_id else "dvr_settings"
+    print(f"  Using settings key: {settings_key}")
+
     rest = f"{supabase_url}/rest/v1"
-    get_url = f"{rest}/app_settings?key=eq.dvr_settings&select=value"
+    get_url = f"{rest}/app_settings?key=eq.{settings_key}&select=value"
 
     # --- Load current cookies from Supabase ---
     print("\n[1/3] Loading current cookies from Supabase...")
@@ -257,7 +232,7 @@ def main():
                 val = extract_single_cookie(cookie_str, key)
                 if val:
                     seed_value[key] = val
-            save_to_supabase(rest, supabase_key, seed_value, is_seed=True)
+            save_to_supabase(rest, supabase_key, seed_value, settings_key=settings_key, is_seed=True)
         else:
             print("  [SKIP] No cookies found in Supabase or .env")
             return
@@ -305,9 +280,16 @@ def main():
         elif new_cf:
             print(f"  cf_clearance unchanged (still valid)")
         else:
-            print(f"  [INFO] No new cf_clearance from curl_cffi")
+            print(f"  [WARN] No new cf_clearance from curl_cffi — refresh may have been blocked")
     else:
-        print("  [INFO] Keeping existing cookies (no new cookies obtained)")
+        print("  [WARN] Cookie refresh failed — removing stale cf_clearance (IP-mismatched)")
+        # Remove stale cf_clearance so the DVR doesn't use an IP-bound cookie
+        # from a different proxy. Without cf_clearance, Cloudflare evaluates
+        # requests based on TLS fingerprint + IP reputation — clean proxies
+        # will pass, flagged ones will be rotated by the transport.
+        merged.pop("cf_clearance", None)
+        merged.pop("__cf_bm", None)
+        merged.pop("__cfruid", None)
 
     print(f"  Total cookies: {len(merged)}")
     print(f"  sessionid: {'[OK]' if 'sessionid' in merged else '[NO]'}")
@@ -316,23 +298,35 @@ def main():
 
     new_cookie_str = join_cookies(merged)
 
-    # --- Write back to Supabase ---
-    print("\nSaving to Supabase...")
-
-    settings_value = {
-        "cookies": new_cookie_str,
-        "user_agent": user_agent,
-    }
-    for key in ("sessionid", "csrftoken", "cf_clearance"):
-        if key in merged:
-            settings_value[key] = merged[key]
-
-    save_to_supabase(rest, supabase_key, settings_value)
-
+    # --- Write back to Supabase (only on actual change) ---
     if refreshed:
+        print("\nSaving refreshed cookies to Supabase...")
+        settings_value = {
+            "cookies": new_cookie_str,
+            "user_agent": user_agent,
+        }
+        for key in ("sessionid", "csrftoken", "cf_clearance"):
+            if key in merged:
+                settings_value[key] = merged[key]
+        save_to_supabase(rest, supabase_key, settings_value, settings_key=settings_key)
         print("\n[OK] Cookies refreshed successfully")
     else:
-        print("\n[OK] Cookies preserved (existing values)")
+        # Still save if we removed stale cf_clearance even without a fresh one
+        old_cf = old.get("cf_clearance", "")
+        new_cf = merged.get("cf_clearance", "")
+        if old_cf != new_cf or new_cookie_str != cookie_str:
+            print("\nSaving cleaned cookies to Supabase (removed stale cf_clearance)...")
+            settings_value = {
+                "cookies": new_cookie_str,
+                "user_agent": user_agent,
+            }
+            for key in ("sessionid", "csrftoken", "cf_clearance"):
+                if key in merged:
+                    settings_value[key] = merged[key]
+            save_to_supabase(rest, supabase_key, settings_value, settings_key=settings_key)
+            print("\n[OK] Stale cf_clearance removed")
+        else:
+            print("\n[SKIP] No changes — keeping existing cookies in Supabase")
 
 
 if __name__ == "__main__":

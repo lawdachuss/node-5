@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -231,6 +232,64 @@ func isProxyError(err error) bool {
 		strings.Contains(msg, "no reachable proxy")
 }
 
+// isCloudflareChallenge checks if the httpcloak response body indicates a
+// Cloudflare challenge/interstitial page. When detected the proxy should be
+// rotated — the current SOCKS5 proxy IP is likely flagged by Cloudflare.
+// Checks both HTTP headers (cf-mitigated) and the body for challenge markers.
+func isCloudflareChallenge(body []byte, headers map[string][]string, statusCode int) bool {
+	// Check for Cloudflare-specific mitigation headers
+	for k, vs := range headers {
+		lower := strings.ToLower(k)
+		if lower == "cf-mitigated" || lower == "cf-challenge" {
+			for _, v := range vs {
+				vLower := strings.ToLower(v)
+				if vLower == "challenge" || vLower == "blocked" || vLower == "captcha" || vLower == "interactive_challenge" || vLower == "managed_challenge" {
+					return true
+				}
+			}
+			return true
+		}
+	}
+
+	// Check for Challenge Platform (Turnstile) or JS challenge pages.
+	// These responses contain HTML with specific Cloudflare strings.
+	if len(body) == 0 {
+		return false
+	}
+	// Only check text/html responses for challenge markers
+	contentType := ""
+	if vs, ok := headers["content-type"]; ok && len(vs) > 0 {
+		contentType = strings.ToLower(vs[0])
+	}
+	if contentType != "" && !strings.Contains(contentType, "text/html") {
+		return false
+	}
+
+	bodyLower := strings.ToLower(string(body))
+	challengeMarkers := []string{
+		"cf-browser-verification",
+		"challenge-form",
+		"just a moment",
+		"checking your browser",
+		"cf-challenge",
+		"turnstile",
+	}
+	for _, marker := range challengeMarkers {
+		if strings.Contains(bodyLower, marker) {
+			return true
+		}
+	}
+
+	// Status codes that often accompany Cloudflare blocks
+	if statusCode == 403 || statusCode == 503 {
+		if contentType == "" || strings.Contains(contentType, "text/html") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // cdnHostSuffixes lists CDN hostname suffixes that serve HLS segments
 // with signed URLs (pkey/token). These hosts are directly reachable from
 // any region — the proxy is only needed for geo-unblocking API requests
@@ -243,9 +302,7 @@ var cdnHostSuffixes = []string{
 }
 
 // proxyBypassHosts lists hosts that should never use the proxy.
-// Stripchat doesn't need a proxy — it has no age verification or
-// datacenter-IP blocking like Chaturbate does from GitHub Actions runners.
-// Only Chaturbate API requests need the SOCKS5 proxy (NL/IN region bypass).
+// Stripchat doesn't need a Netherlands proxy — it has no age verification.
 var proxyBypassHosts = []string{
 	"stripchat.com",
 	".stripchat.com",
@@ -387,6 +444,19 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 			if bodyErr != nil {
 				cloakResp.Close()
 				return nil, bodyErr
+			}
+
+			// Detect Cloudflare challenge pages and rotate proxy.
+			// A flagged proxy IP returns a challenge page instead of the
+			// real API response — treat it like a connection failure and
+			// try the next proxy in the pool.
+			if isCloudflareChallenge(body, cloakResp.Headers, cloakResp.StatusCode) {
+				cloakResp.Close()
+				log.Printf("[proxy] Cloudflare challenge detected on proxy %d/%d, rotating", attempt+1, max(1, proxyCount))
+				if t.rotateProxy() {
+					continue
+				}
+				return nil, fmt.Errorf("cloudflare challenge, no more proxies to try")
 			}
 
 			resp := &http.Response{

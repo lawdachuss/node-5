@@ -389,8 +389,16 @@ func SavePoolToDB(data []byte) error {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
+func settingsKey() string {
+	id := NodeID()
+	if id == "" {
+		return "dvr_settings"
+	}
+	return "dvr_settings_" + id
+}
+
 func SaveSettingsToDB(data []byte) error {
-	if err := saveJSONSetting("dvr_settings", data); err != nil {
+	if err := saveJSONSetting(settingsKey(), data); err != nil {
 		return fmt.Errorf("save settings to Supabase: %w", err)
 	}
 	return nil
@@ -399,7 +407,7 @@ func SaveSettingsToDB(data []byte) error {
 func LoadSettingsFromDB() []byte {
 	// Use the fast (10s) client so the web server starts quickly even when
 	// Supabase is unreachable or slow.
-	return loadJSONSettingFast("dvr_settings")
+	return loadJSONSettingFast(settingsKey())
 }
 
 // ─── Recordings ───────────────────────────────────────────────────────────────
