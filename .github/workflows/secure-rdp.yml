@@ -453,19 +453,28 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] Scrapling installed, installing Chromium browser..."
             $chromiumOk = $false
+            # Save and remove proxy env vars - Playwright's Node.js can't download
+            # Chromium through a SOCKS5 proxy (no HTTP CONNECT support).
+            $savedProxy = @{}
+            foreach ($var in @("ALL_PROXY","all_proxy","HTTP_PROXY","http_proxy","HTTPS_PROXY","https_proxy","SOCKS_PROXY","socks_proxy","PROXY_URL","PROXY_SERVER")) {
+              $val = [Environment]::GetEnvironmentVariable($var, "Process")
+              if ($val) { $savedProxy[$var] = $val; Remove-Item "Env:$var" -ErrorAction SilentlyContinue }
+            }
             # Strategy 1: Try Playwright CDN with retries (503/ECONNRESET is often transient)
             foreach ($dh in @("https://playwright.azureedge.net", "https://cdn.playwright.dev")) {
               foreach ($wait in @(10, 20)) {
                 $env:PLAYWRIGHT_DOWNLOAD_HOST = $dh
                 Write-Host "  Downloading Chromium from $dh (retry after ${wait}s)..."
-                $out = & { python -m playwright install chromium } 2>&1
+                $ErrorActionPreference = 'Continue'
+                python -m playwright install chromium 2>$null
                 if ($LASTEXITCODE -eq 0) { $chromiumOk = $true; break }
-                Write-Host "    Download failed (exit $LASTEXITCODE)"
-                $out -split "`n" | Select-Object -Last 3 | ForEach-Object { Write-Host "    $_" }
+                Write-Host "    Download failed (exit $LASTEXITCODE), retrying in ${wait}s..."
                 Start-Sleep -Seconds $wait
               }
               if ($chromiumOk) { break }
             }
+            # Restore proxy env vars
+            foreach ($kv in $savedProxy.GetEnumerator()) { [Environment]::SetEnvironmentVariable($kv.Key, $kv.Value, "Process") }
             Remove-Item Env:PLAYWRIGHT_DOWNLOAD_HOST -ErrorAction SilentlyContinue
             # Strategy 2: Try system Chrome via channel (windows-latest has Chrome pre-installed)
             if (-not $chromiumOk) {
