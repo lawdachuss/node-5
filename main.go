@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/channel"
-	"github.com/teacat/chaturbate-dvr/chaturbate"
 	"github.com/teacat/chaturbate-dvr/config"
 	"github.com/teacat/chaturbate-dvr/coordinator"
 	"github.com/teacat/chaturbate-dvr/entity"
@@ -563,34 +561,19 @@ func start(c *cli.Context) error {
 type liveChecker struct{}
 
 func (l *liveChecker) IsLive(ctx context.Context, siteName, username string) (bool, error) {
+	var siteImpl site.Site
 	switch siteName {
 	case "stripchat":
-		siteImpl := stripchat.NewStripchatSite()
-		status, err := siteImpl.GetRoomStatus(ctx, internal.NewReq(), username)
-		if err != nil {
-			return false, err
-		}
-		return status == site.StatusPublic || status == site.StatusPrivate, nil
+		siteImpl = stripchat.NewStripchatSite()
+	default:
+		siteImpl = site.NewChaturbateSite()
 	}
 
-	// Chaturbate: try POST API first (like FetchStream), then GET fallback.
-	// The POST path has circuit-breaker awareness and CSRF auth; if it succeeds
-	// we get an authoritative live/offline verdict. If POST fails (e.g. missing
-	// CSRF, circuit open) we fall back to the GET-only path.
-	body, err := internal.PostChaturbateAPI(ctx, username)
-	if err == nil {
-		var resp chaturbate.APIResponse
-		if jsonErr := json.Unmarshal([]byte(body), &resp); jsonErr == nil {
-			return resp.RoomStatus == chaturbate.StatusPublic || resp.RoomStatus == chaturbate.StatusPrivate, nil
-		}
-	}
-
-	// Fall back to GET-only path (no CSRF needed, pure cookie auth)
-	siteImpl := site.NewChaturbateSite()
 	status, err := siteImpl.GetRoomStatus(ctx, internal.NewReq(), username)
 	if err != nil {
 		return false, err
 	}
+
 	return status == site.StatusPublic || status == site.StatusPrivate, nil
 }
 
