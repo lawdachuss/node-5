@@ -119,6 +119,89 @@ type AdminData struct {
 }
 
 // AdminPage renders the admin panel with deep upload/orphan matrices.
+var (
+	adminRecsMu     sync.RWMutex
+	adminRecsCache  []database.Recording
+	adminRecsTime   time.Time
+	adminNodesMu    sync.RWMutex
+	adminNodesCache []database.Node
+	adminNodesTime  time.Time
+	adminAssnMu     sync.RWMutex
+	adminAssnCache  []database.ChannelAssignment
+	adminAssnTime   time.Time
+)
+
+const adminCacheTTL = 30 * time.Second
+
+func cachedRecordings() []database.Recording {
+	adminRecsMu.RLock()
+	if time.Since(adminRecsTime) < adminCacheTTL && adminRecsCache != nil {
+		v := adminRecsCache
+		adminRecsMu.RUnlock()
+		return v
+	}
+	adminRecsMu.RUnlock()
+	db := server.GetDBClient()
+	if db == nil {
+		return nil
+	}
+	recs, err := db.GetAllRecordings()
+	if err != nil {
+		return nil
+	}
+	adminRecsMu.Lock()
+	adminRecsCache = recs
+	adminRecsTime = time.Now()
+	adminRecsMu.Unlock()
+	return recs
+}
+
+func cachedNodes() ([]database.Node, error) {
+	adminNodesMu.RLock()
+	if time.Since(adminNodesTime) < adminCacheTTL && adminNodesCache != nil {
+		v := adminNodesCache
+		adminNodesMu.RUnlock()
+		return v, nil
+	}
+	adminNodesMu.RUnlock()
+	db := server.GetDBClient()
+	if db == nil {
+		return nil, nil
+	}
+	nodes, err := db.GetAllNodes()
+	if err != nil {
+		return nil, err
+	}
+	adminNodesMu.Lock()
+	adminNodesCache = nodes
+	adminNodesTime = time.Now()
+	adminNodesMu.Unlock()
+	return nodes, nil
+}
+
+func cachedAssignments() ([]database.ChannelAssignment, error) {
+	adminAssnMu.RLock()
+	if time.Since(adminAssnTime) < adminCacheTTL && adminAssnCache != nil {
+		v := adminAssnCache
+		adminAssnMu.RUnlock()
+		return v, nil
+	}
+	adminAssnMu.RUnlock()
+	db := server.GetDBClient()
+	if db == nil {
+		return nil, nil
+	}
+	assn, err := db.GetAllAssignments()
+	if err != nil {
+		return nil, err
+	}
+	adminAssnMu.Lock()
+	adminAssnCache = assn
+	adminAssnTime = time.Now()
+	adminAssnMu.Unlock()
+	return assn, nil
+}
+
 func AdminPage(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age=15")
 
@@ -131,7 +214,7 @@ func AdminPage(c *gin.Context) {
 		dirs = append(dirs, server.Config.OutputDir)
 	}
 	uploaded := map[string]bool{}
-	allRecs, _ := server.GetDBClient().GetAllRecordings()
+	allRecs := cachedRecordings()
 	for i := range allRecs {
 		uploaded[allRecs[i].Filename] = true
 	}
@@ -219,22 +302,11 @@ func AdminPage(c *gin.Context) {
 	}
 
 	// ── Nodes ──
-	var nodes []database.Node
-	var assignments []database.ChannelAssignment
 	onlineNodes := 0
 	drainingNodes := 0
 	totalNodeLoad := 0
-	if dbClient := server.GetDBClient(); dbClient != nil {
-		var err error
-		nodes, err = dbClient.GetAllNodes()
-		if err != nil {
-			fmt.Printf("[WARN] admin: failed to load nodes: %v\n", err)
-		}
-		assignments, err = dbClient.GetAllAssignments()
-		if err != nil {
-			fmt.Printf("[WARN] admin: failed to load assignments: %v\n", err)
-		}
-	}
+	nodes, _ := cachedNodes()
+	assignments, _ := cachedAssignments()
 	for _, n := range nodes {
 		if n.Status == "online" {
 			onlineNodes++
