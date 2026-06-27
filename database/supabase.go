@@ -1050,6 +1050,40 @@ func (c *Client) RepairOrphanedAssignments() (int, error) {
 	return len(orphaned), nil
 }
 
+// ReleaseChannelsByUsername releases specific channels (by username) assigned
+// to this node back to the pool.  Unlike ReleaseExcessChannels which picks
+// channels by a heuristic, this targets an exact set of usernames.
+// Used by the offline rotation loop to release a random subset of offline
+// channels so other nodes get a chance to claim them.
+func (c *Client) ReleaseChannelsByUsername(nodeID string, usernames []string) ([]ChannelAssignment, error) {
+	if len(usernames) == 0 {
+		return nil, nil
+	}
+
+	resp, err := c.requestWithRetry("PATCH",
+		fmt.Sprintf("/channel_assignments?assigned_node=eq.%s&username=in.(%s)",
+			url.QueryEscape(nodeID), joinEscaped(usernames)),
+		map[string]interface{}{
+			"assigned_node": nil,
+			"status":        "unassigned",
+		})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var released []ChannelAssignment
+	if err := json.NewDecoder(resp.Body).Decode(&released); err != nil {
+		return nil, fmt.Errorf("decode released: %w", err)
+	}
+	return released, nil
+}
+
 // DeleteAssignment removes a channel assignment entirely from the pool.
 func (c *Client) DeleteAssignment(username, site string) error {
 	return c.delete(fmt.Sprintf("/channel_assignments?username=eq.%s&site=eq.%s", url.QueryEscape(username), url.QueryEscape(site)))

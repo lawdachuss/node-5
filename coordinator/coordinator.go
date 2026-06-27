@@ -83,8 +83,8 @@ func New(client *database.Client, mgr ChannelManager) *Coordinator {
 
 func (c *Coordinator) IsPooled() bool { return c.Mode == entity.PoolModePooled }
 
-// Start begins all background goroutines: heartbeat, claim, live check, reaper.
-// Only starts them if mode is "pooled".
+// Start begins all background goroutines: heartbeat, claim, live check, reaper,
+// and offline rotation.  Only starts them if mode is "pooled".
 func (c *Coordinator) Start(ctx context.Context) {
 	c.mu.Lock()
 	if c.started {
@@ -104,6 +104,7 @@ func (c *Coordinator) Start(ctx context.Context) {
 	c.StartClaimLoop(ctx)
 	c.StartLiveCheckLoop(ctx)
 	c.StartReaperLoop(ctx)
+	c.StartOfflineRotationLoop(ctx)
 }
 
 // Stop gracefully shuts down all coordinator loops and deregisters the node.
