@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -484,6 +485,11 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 				return nil, fmt.Errorf("age verification, no more proxies to try")
 			}
 
+			// Extract cf_clearance from Set-Cookie headers issued by Cloudflare.
+			// When a working proxy is found, Cloudflare may issue a cf_clearance
+			// cookie — capture it so subsequent API requests include it.
+			t.extractCfClearance(cloakResp)
+
 			resp := &http.Response{
 				StatusCode: cloakResp.StatusCode,
 				Header:     make(http.Header),
@@ -509,7 +515,7 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, err
 	}
 
-	// All SOCKS5 proxies failed — try to refresh the proxy list before giving up.
+// All SOCKS5 proxies failed — try to refresh the proxy list before giving up.
 	// The renewing flag prevents re-entrant calls that would cause infinite recursion
 	// when the refreshed proxy list contains the same (still-failing) proxies.
 	t.mu.Lock()
@@ -532,6 +538,45 @@ func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error
 		t.mu.Unlock()
 	}
 	return nil, fmt.Errorf("all proxies failed")
+}
+
+// extractCfClearance checks httpcloak response headers for a cf_clearance
+// Set-Cookie and updates server.Config so subsequent API requests include it.
+func (t *httpcloakTransport) extractCfClearance(cloakResp *httpcloak.Response) {
+	if cloakResp.Headers == nil {
+		return
+	}
+	var newClearance string
+	for k, vs := range cloakResp.Headers {
+		if strings.ToLower(k) != "set-cookie" {
+			continue
+		}
+		for _, v := range vs {
+			if strings.HasPrefix(v, "cf_clearance=") {
+				end := strings.IndexAny(v, ";")
+				if end < 0 {
+					end = len(v)
+				}
+				newClearance = v[len("cf_clearance="):end]
+			}
+		}
+	}
+	if newClearance == "" {
+		return
+	}
+
+	server.ConfigMu.Lock()
+	if newClearance != "" && newClearance != server.Config.CfClearance {
+		if !strings.Contains(server.Config.Cookies, "cf_clearance=") {
+			server.Config.Cookies = strings.TrimSpace(server.Config.Cookies + "; cf_clearance=" + newClearance)
+		} else {
+			server.Config.Cookies = regexp.MustCompile(`cf_clearance=[^;]+`).
+				ReplaceAllString(server.Config.Cookies, "cf_clearance="+newClearance)
+		}
+		server.Config.CfClearance = newClearance
+		log.Printf("[proxy] captured cf_clearance from Set-Cookie")
+	}
+	server.ConfigMu.Unlock()
 }
 
 // refreshProxies fetches fresh proxy URLs from the configured refresh URL
