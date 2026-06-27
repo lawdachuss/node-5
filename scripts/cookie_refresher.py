@@ -100,7 +100,7 @@ def try_refresh_with_scrapling(user_agent, proxy=None):
 
     channel = os.environ.get("SCRAPLING_CHANNEL", "")
 
-    for mode_name, mode_proxy in [("direct", None), ("proxy", proxy)]:
+    for mode_name, mode_proxy in [("proxy", proxy), ("direct", None)]:
         if mode_name == "proxy" and not proxy:
             continue
         print(f"  [{mode_name}] Connecting via {mode_proxy or 'direct'}...")
