@@ -322,7 +322,7 @@ jobs:
             --hostname="github-rdp-${{ github.run_id }}" `
             --accept-routes `
             --accept-dns=false `
-            --timeout=60s `
+            --timeout=60s
           if ($LASTEXITCODE -ne 0) { Write-Error "tailscale up failed"; exit 1 }
 
           Write-Host "-------- TAILSCALE STATUS --------"
