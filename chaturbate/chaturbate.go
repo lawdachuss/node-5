@@ -124,6 +124,11 @@ func fetchAPIResponse(ctx context.Context, client *internal.Req, username string
 			internal.ReportChaturbateFailure()
 			return fmt.Errorf("empty response body")
 		}
+		// HTML 404 (offline/nonexistent channel) — stop retrying
+		if strings.Contains(body, "<!DOCTYPE html") && strings.Contains(body, "404") {
+			internal.ReportChaturbateFailure()
+			return retry.Unrecoverable(fmt.Errorf("channel not found (HTTP 404)"))
+		}
 		internal.ReportChaturbateSuccess()
 		return nil
 	},
