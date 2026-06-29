@@ -817,10 +817,12 @@ func (c *Client) GetAliveNodes() ([]Node, error) {
 }
 
 // GetDeadNodes returns node IDs whose heartbeat is older than the timeout.
+// Checks ALL nodes regardless of status so that nodes marked offline without
+// releasing their channels (e.g. crashed runners) are found and reclaimed.
 func (c *Client) GetDeadNodes(timeout time.Duration) ([]string, error) {
 	cutoff := time.Now().Add(-timeout).UTC().Format(time.RFC3339)
 	var nodes []Node
-	err := c.get(fmt.Sprintf("/nodes?status=eq.online&last_heartbeat=lt.%s&select=node_id", url.QueryEscape(cutoff)), &nodes)
+	err := c.get(fmt.Sprintf("/nodes?last_heartbeat=lt.%s&select=node_id", url.QueryEscape(cutoff)), &nodes)
 	if err != nil {
 		return nil, err
 	}
