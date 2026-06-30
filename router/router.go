@@ -118,6 +118,7 @@ func SetupViews(r *gin.Engine) {
 // LoadHTMLFromEmbedFS loads specific HTML templates from an embedded filesystem and registers them with Gin.
 func LoadHTMLFromEmbedFS(r *gin.Engine, embeddedFS embed.FS, files ...string) error {
 	templ := template.New("").Funcs(template.FuncMap{
+		"add":    func(a, b int) int { return a + b },
 		"printf": fmt.Sprintf,
 		"subOnline": func(chs []*entity.ChannelInfo) int {
 			n := 0
