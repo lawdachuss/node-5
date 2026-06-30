@@ -22,10 +22,10 @@ type CatboxUploader struct {
 
 // NewCatboxUploader creates a new Catbox.moe uploader.
 // Reads CATBOX_USERHASH from the environment for authenticated uploads.
-// Uses newDefaultClient which routes through ALL_PROXY if set.
+// Uses newNoProxyClient — uploads must never route through the Chaturbate SOCKS5 proxy.
 func NewCatboxUploader() *CatboxUploader {
 	return &CatboxUploader{
-		client:   newDefaultClient(5 * time.Minute),
+		client:   newNoProxyClient(5 * time.Minute),
 		userhash: os.Getenv("CATBOX_USERHASH"),
 	}
 }

@@ -50,7 +50,7 @@ func GenerateThumbnailForFile(videoPath string) (thumbURL, spriteURL, previewURL
 // URLs returned.  Local temp files are always cleaned up.
 //
 // JPEG is used for thumbnail and sprite because:
-//   - All image hosts support it (Pixhost, ImgBB, Catbox)
+//   - All image hosts support it (Pixhost, Catbox)
 //   - mjpeg encoder is fast (minimal encoding lag)
 //   - Small filesize with good visual quality
 //
@@ -269,8 +269,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	//   1 min:   12 clips × 0.5s = 6s (5s between clips)
 	//   60 min:  12 clips × 0.5s = 6s (5 min between clips)
 	//
-	// Uploaded to Catbox.moe (free, permanent, CDN-backed) with PixelDrain
-	// and PixelDrain as fallbacks.
+	// Uploaded to Catbox.moe (free, permanent, CDN-backed) with LobFile as fallback.
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -408,7 +407,6 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		previewGenerated = true
 
 		catboxUploader := uploader.NewCatboxUploader()
-		pixeldrainUploader := uploader.NewPixelDrainUploader(os.Getenv("PIXELDRAIN_API_KEY"))
 		lobfileUploader := uploader.NewLobFileUploader(os.Getenv("LOBFILE_API_KEY"))
 		var remoteURL string
 		var uploadErr error
@@ -428,18 +426,12 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 				}
 			}
 
-			// Try hosts in order: Catbox → PixelDrain → LobFile
+			// Try hosts in order: Catbox → LobFile
 			remoteURL, uploadErr = catboxUploader.Upload(previewMP4)
 			if uploadErr == nil {
 				break
 			}
-			errFn("preview: catbox failed for %s: %v, trying PixelDrain", baseName, uploadErr)
-
-			remoteURL, uploadErr = pixeldrainUploader.Upload(previewMP4)
-			if uploadErr == nil {
-				break
-			}
-			errFn("preview: PixelDrain failed for %s: %v, trying LobFile", baseName, uploadErr)
+			errFn("preview: catbox failed for %s: %v, trying LobFile", baseName, uploadErr)
 
 			remoteURL, uploadErr = lobfileUploader.Upload(previewMP4)
 			if uploadErr == nil {
@@ -462,7 +454,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			info("preview: ✓ %s", baseName)
 			previewDone <- remoteURL
 		} else {
-			errFn("preview: Catbox, PixelDrain, and LobFile all failed for %s: %v", baseName, uploadErr)
+			errFn("preview: Catbox and LobFile both failed for %s: %v", baseName, uploadErr)
 			previewDone <- ""
 		}
 	}()

@@ -82,7 +82,7 @@ def extract_single_cookie(cookie_str, name):
     return None
 
 
-def try_refresh_with_curl_cffi(user_agent, proxy=None):
+def try_refresh_with_curl_cffi(user_agent, proxy=None, timeout=120, impersonate="chrome124"):
     """Try to get fresh cookies using curl_cffi (browser TLS impersonation).
 
     Returns dict of new cookies, or empty dict on failure.
@@ -94,40 +94,31 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         print("  [INFO] curl_cffi not available")
         return {}
 
-    print("  Trying curl_cffi (browser TLS impersonation)...")
+    print(f"  Trying curl_cffi ({impersonate}, {timeout}s)...")
 
-    impersonate = "chrome124"
     session_cookies = {}
 
     proxies = None
     if proxy:
-        # curl_cffi uses socks5h:// for DNS resolution through proxy
-        if proxy.startswith("socks5://"):
-            proxy_h = proxy.replace("socks5://", "socks5h://", 1)
-        else:
-            proxy_h = proxy
-        proxies = {"https": proxy_h, "http": proxy_h}
+        proxies = {"https": proxy, "http": proxy}
         print(f"  Using proxy: {proxy}")
 
-    # First: visit chaturbate.com to get initial cookies
     try:
         resp = cffi_requests.get(
             "https://chaturbate.com",
             impersonate=impersonate,
-            timeout=60,
+            timeout=timeout,
             proxies=proxies,
             headers={"User-Agent": user_agent} if user_agent else None,
             allow_redirects=True,
         )
         print(f"  curl_cffi status: {resp.status_code}, url: {resp.url}")
 
-        # Extract cookies from response
         if hasattr(resp, "cookies"):
             for name, value in resp.cookies.items():
                 session_cookies[name] = value
                 print(f"    Cookie: {name}={value[:30]}...")
 
-        # Also check Set-Cookie headers directly
         if hasattr(resp, "headers"):
             for header_val in resp.headers.get_list("set-cookie"):
                 if "=" in header_val:
@@ -146,6 +137,38 @@ def try_refresh_with_curl_cffi(user_agent, proxy=None):
         return {}
 
     return session_cookies
+
+
+def try_all_proxies(user_agent, proxy_list):
+    """Try each proxy with retry and different impersonations.
+
+    For each proxy:
+      attempt 1: chrome124 @ 120s
+      attempt 2: chrome131 @ 180s
+
+    Returns the first successful cookie dict, or empty dict.
+    """
+    attempts = [
+        {"impersonate": "chrome124", "timeout": 120},
+        {"impersonate": "chrome131", "timeout": 180},
+    ]
+
+    for idx, proxy in enumerate(proxy_list):
+        proxy = proxy.strip()
+        if not proxy:
+            continue
+        print(f"\n  --- Proxy {idx+1}/{len(proxy_list)}: {proxy} ---")
+        for attempt_num, params in enumerate(attempts):
+            print(f"  Attempt {attempt_num+1}/{len(attempts)}...")
+            result = try_refresh_with_curl_cffi(
+                user_agent,
+                proxy=proxy,
+                timeout=params["timeout"],
+                impersonate=params["impersonate"],
+            )
+            if result:
+                return result
+    return {}
 
 
 def save_to_supabase(rest, api_key, value, is_seed=False):
@@ -184,7 +207,13 @@ def main():
 
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     supabase_key = os.environ.get("SUPABASE_API_KEY", "")
-    proxy = os.environ.get("ALL_PROXY", "")
+
+    proxy_url = os.environ.get("PROXY_URL", "")
+    if proxy_url:
+        proxy_list = [p.strip() for p in proxy_url.split(",") if p.strip()]
+    else:
+        all_proxy = os.environ.get("ALL_PROXY", "")
+        proxy_list = [all_proxy] if all_proxy else []
 
     if not supabase_url or not supabase_key:
         print("  [SKIP] SUPABASE_URL or SUPABASE_API_KEY not set")
@@ -246,12 +275,17 @@ def main():
     print(f"  sessionid: {'[OK]' if 'sessionid' in old else '[NO]'}")
     print(f"  csrftoken: {'[OK]' if 'csrftoken' in old else '[NO]'}")
     print(f"  cf_clearance: {'[OK]' if 'cf_clearance' in old else '[NO]'}")
-    print(f"  Proxy: {'[OK] ' + proxy if proxy else '[NO] (direct)'}")
+    if proxy_list:
+        print(f"  Proxies: {len(proxy_list)} available")
+        for p in proxy_list:
+            print(f"    {p}")
+    else:
+        print("  Proxy: [NO]")
 
     # --- Try to refresh cookies ---
     print("\n[2/3] Refreshing cookies...")
 
-    new_cookies = try_refresh_with_curl_cffi(user_agent, proxy)
+    new_cookies = try_all_proxies(user_agent, proxy_list)
 
     # --- Merge and save ---
     print("\n[3/3] Merging cookies...")

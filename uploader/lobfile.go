@@ -21,7 +21,7 @@ type LobFileUploader struct {
 func NewLobFileUploader(apiKey string) *LobFileUploader {
 	return &LobFileUploader{
 		apiKey: apiKey,
-		client: newDefaultClient(10 * time.Minute),
+		client: newNoProxyClient(10 * time.Minute),
 	}
 }
 

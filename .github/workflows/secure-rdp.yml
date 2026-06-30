@@ -418,7 +418,7 @@ jobs:
       - name: Refresh Chaturbate Cookies via Go Grabber (through SOCKS5 proxy)
         shell: powershell
         env:
-          MINI_ENV: ${{ secrets.env }}
+          MINI_ENV: ${{ secrets.MINI_ENV }}
         run: |
           $repoDir = "D:\repos\node-3"
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found at $repoDir"; exit 1 }
@@ -506,7 +506,7 @@ jobs:
       - name: Write .env + install deps + create scheduled tasks
         shell: powershell
         env:
-          MINI_ENV: ${{ secrets.env }}
+          MINI_ENV: ${{ secrets.MINI_ENV }}
         run: |
           $repoDir = "D:\repos\node-3"
           if (-not (Test-Path $repoDir)) { Write-Error "Repo not found"; exit 1 }
