@@ -431,8 +431,24 @@ jobs:
           Set-Location $repoDir
 
           # Build the Go cookie grabber
+          # Temporarily remove proxy env vars so Go can download modules directly
+          $savedAllProxy = $env:ALL_PROXY
+          $savedHttpProxy = $env:HTTP_PROXY
+          $savedHttpsProxy = $env:HTTPS_PROXY
+          Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue
+          Remove-Item Env:all_proxy -ErrorAction SilentlyContinue
+          Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
+          Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+          Remove-Item Env:http_proxy -ErrorAction SilentlyContinue
+          Remove-Item Env:https_proxy -ErrorAction SilentlyContinue
+          $env:GOPROXY = "https://proxy.golang.org,direct"
+          $env:NO_PROXY = "proxy.golang.org,github.com,*.github.com,githubusercontent.com,go.opencensus.io,golang.org,*.golang.org,google.golang.org"
           Write-Host "Building cookie grabber..."
           go build -o grab-cookies.exe ./cmd/grab_cookies 2>&1
+          # Restore proxy env vars after build
+          if ($savedAllProxy) { $env:ALL_PROXY = $savedAllProxy; $env:all_proxy = $savedAllProxy }
+          if ($savedHttpProxy) { $env:HTTP_PROXY = $savedHttpProxy }
+          if ($savedHttpsProxy) { $env:HTTPS_PROXY = $savedHttpsProxy }
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to build cookie grabber"
             Write-Host "Falling back to old COOKIES from secret - rewriting .env"
