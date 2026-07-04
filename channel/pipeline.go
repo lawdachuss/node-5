@@ -197,6 +197,8 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 		cfg.MixdropEmail,
 		cfg.MixdropToken,
 		cfg.SeekStreamingKey,
+		cfg.VidHideAPIKey,
+		cfg.StreamWishAPIKey,
 		ch,
 	)
 

@@ -16,16 +16,11 @@ import (
 	"time"
 )
 
-// seekStreamingSem limits concurrent uploads to SeekStreaming.
-const seekStreamingSemCap = 3
-
 // seekStreamingChunkSize is the maximum bytes sent in a single TUS PATCH
 // request. Splitting uploads into chunks avoids Cloudflare's 100-second proxy
 // timeout on the upstream server, which causes a 502 Bad Gateway for large
 // files sent as a single monolithic PATCH body.
 const seekStreamingChunkSize = 50 * 1024 * 1024 // 50 MB
-
-var seekStreamingSem = make(chan struct{}, seekStreamingSemCap)
 
 type SeekStreamingUploader struct {
 	key    string
@@ -73,21 +68,31 @@ func isUploadPayloadTooLarge(err error) bool {
 }
 
 func (u *SeekStreamingUploader) UploadWithProgress(filePath string, progress ProgressFunc) (string, error) {
-	seekStreamingSem <- struct{}{}
-	defer func() { <-seekStreamingSem }()
-
-	ep, err := u.getUploadEndpoint()
-	if err != nil {
-		return "", fmt.Errorf("seekstreaming: %w", err)
+	if u.key == "" {
+		return "", fmt.Errorf("SeekStreaming API key not configured")
 	}
-	fmt.Printf("[seekstreaming] got upload endpoint — tusUrl=%s accessToken=%s\n",
-		maskSensitiveURL(ep.TusURL), maskSensitive(ep.AccessToken))
 
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		if attempt > 1 {
 			time.Sleep(uploadBackoff(attempt-2, lastErr))
 		}
+
+		ep, err := u.getUploadEndpoint()
+		if err != nil {
+			lastErr = fmt.Errorf("get upload endpoint: %w", err)
+			if isUploadRateLimited(err) {
+				time.Sleep(uploadBackoff(attempt, err))
+				lastErr = nil
+				continue
+			}
+			if attempt < 3 {
+				continue
+			}
+			return "", lastErr
+		}
+		fmt.Printf("[seekstreaming] got upload endpoint — tusUrl=%s accessToken=%s\n",
+			maskSensitiveURL(ep.TusURL), maskSensitive(ep.AccessToken))
 
 		uploadURL, err := u.createTUSUpload(ep, filePath)
 		if err != nil {
@@ -131,18 +136,7 @@ func (u *SeekStreamingUploader) UploadWithProgress(filePath string, progress Pro
 		// Log the video ID we extracted from the TUS upload URL
 		fmt.Printf("[seekstreaming] upload complete — extracted videoID=%s\n", videoID)
 
-		// Verify the uploaded video exists by calling the manage API.
-		// Log the response so we can confirm the video is accessible and
-		// see the assetUrl which may indicate the correct embed URL format.
-		_, verifyErr := GetSeekStreamingPosterURL(u.key, videoID)
-		if verifyErr != nil {
-			fmt.Printf("[seekstreaming] WARNING: manage API verification failed for videoID=%s: %v\n",
-				videoID, verifyErr)
-		} else {
-			fmt.Printf("[seekstreaming] manage API OK — assetUrl/poster available for videoID=%s\n", videoID)
-		}
-
-		embedURL := fmt.Sprintf("https://chuglii.embedseek.com/#%s", videoID)
+		embedURL := fmt.Sprintf("https://chuglii.seeks.cloud/#%s", videoID)
 		fmt.Printf("[seekstreaming] embed URL: %s\n", embedURL)
 		return embedURL, nil
 	}

@@ -55,8 +55,12 @@ func main() {
 	}
 
 	seekStreamingKey := os.Getenv("SEEKSTREAMING_KEY")
+	vidHideAPIKey := os.Getenv("VIDHIDE_API_KEY")
+	streamWishAPIKey := os.Getenv("STREAMWISH_API_KEY")
 
 	log.Printf("SeekStreaming key: %s", mask(seekStreamingKey))
+	log.Printf("VidHide key: %s", mask(vidHideAPIKey))
+	log.Printf("StreamWish key: %s", mask(streamWishAPIKey))
 
 	// Test SeekStreaming
 	if seekStreamingKey != "" {
@@ -71,6 +75,36 @@ func main() {
 		}
 	} else {
 		log.Println("SeekStreaming: no key, skipping")
+	}
+
+	// Test VidHide
+	if vidHideAPIKey != "" {
+		log.Println("=== Testing VidHide ===")
+		vh := uploader.NewVidHideUploader(vidHideAPIKey)
+		start := time.Now()
+		url, err := vh.Upload(videoPath)
+		if err != nil {
+			log.Printf("VidHide FAILED: %v", err)
+		} else {
+			log.Printf("VidHide SUCCESS (%v): %s", time.Since(start).Round(time.Second), url)
+		}
+	} else {
+		log.Println("VidHide: no key, skipping")
+	}
+
+	// Test StreamWish
+	if streamWishAPIKey != "" {
+		log.Println("=== Testing StreamWish ===")
+		sw := uploader.NewStreamWishUploader(streamWishAPIKey)
+		start := time.Now()
+		url, err := sw.Upload(videoPath)
+		if err != nil {
+			log.Printf("StreamWish FAILED: %v", err)
+		} else {
+			log.Printf("StreamWish SUCCESS (%v): %s", time.Since(start).Round(time.Second), url)
+		}
+	} else {
+		log.Println("StreamWish: no key, skipping")
 	}
 
 	fmt.Println("\nDone.")

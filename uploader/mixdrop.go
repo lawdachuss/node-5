@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-// mixdropSem limits concurrent uploads to Mixdrop.
-const mixdropSemCap = 3
 
-var mixdropSem = make(chan struct{}, mixdropSemCap)
 
 // MixdropUploader handles uploading files to Mixdrop
 type MixdropUploader struct {
@@ -60,8 +57,9 @@ func (u *MixdropUploader) Upload(filePath string) (string, error) {
 
 // UploadWithProgress uploads a file to Mixdrop and reports progress through fn.
 func (u *MixdropUploader) UploadWithProgress(filePath string, progress ProgressFunc) (string, error) {
-	mixdropSem <- struct{}{}
-	defer func() { <-mixdropSem }()
+	if u.email == "" || u.token == "" {
+		return "", fmt.Errorf("Mixdrop email or token not configured")
+	}
 
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {

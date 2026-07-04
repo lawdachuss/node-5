@@ -171,6 +171,8 @@ type MultiHostUploader struct {
 	streamtape    *StreamtapeUploader
 	mixdrop       *MixdropUploader
 	seekstreaming *SeekStreamingUploader
+	vidhide       *VidHideUploader
+	streamwish    *StreamWishUploader
 	log           Logger
 	hostInitOnce  sync.Once
 	hosts         map[string]uploaderFunc // host name -> upload function, lazy-init
@@ -200,11 +202,17 @@ func (m *MultiHostUploader) initHosts() {
 		if m.seekstreaming != nil && m.seekstreaming.key != "" {
 			m.hosts["SeekStreaming"] = m.seekstreaming.UploadWithProgress
 		}
+		if m.vidhide != nil && m.vidhide.apiKey != "" {
+			m.hosts["VidHide"] = m.vidhide.UploadWithProgress
+		}
+		if m.streamwish != nil && m.streamwish.apiKey != "" {
+			m.hosts["StreamWish"] = m.streamwish.UploadWithProgress
+		}
 	})
 }
 
 // NewMultiHostUploader creates a new multi-host uploader
-func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken, seekStreamingKey string, log Logger) *MultiHostUploader {
+func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken, seekStreamingKey, vidHideAPIKey, streamWishAPIKey string, log Logger) *MultiHostUploader {
 	if log == nil {
 		log = &nilLogger{}
 	}
@@ -214,6 +222,8 @@ func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEm
 		streamtape:    NewStreamtapeUploader(streamtapeLogin, streamtapeKey),
 		mixdrop:       NewMixdropUploader(mixdropEmail, mixdropToken),
 		seekstreaming: NewSeekStreamingUploader(seekStreamingKey),
+		vidhide:       NewVidHideUploader(vidHideAPIKey),
+		streamwish:    NewStreamWishUploader(streamWishAPIKey),
 		log:           log,
 	}
 }

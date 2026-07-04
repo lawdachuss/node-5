@@ -28,6 +28,16 @@ func embedURLFromLink(host, link string) string {
 		return link
 	case "SeekStreaming":
 		return link
+	case "VidHide":
+		code := link[strings.LastIndex(link, "/")+1:]
+		if code != "" {
+			return "https://xvs.tt/e/" + code
+		}
+	case "StreamWish":
+		code := link[strings.LastIndex(link, "/")+1:]
+		if code != "" {
+			return "https://xvs.tt/e/" + code
+		}
 	}
 	return ""
 }
@@ -87,6 +97,8 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL, previewURL s
 		cfg.MixdropEmail,
 		cfg.MixdropToken,
 		cfg.SeekStreamingKey,
+		cfg.VidHideAPIKey,
+		cfg.StreamWishAPIKey,
 		ch, // Channel implements uploader.Logger
 	)
 

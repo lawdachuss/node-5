@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-// streamtapeSem limits concurrent uploads to Streamtape.
-const streamtapeSemCap = 3
 
-var streamtapeSem = make(chan struct{}, streamtapeSemCap)
 
 // StreamtapeUploader handles uploading files to Streamtape
 type StreamtapeUploader struct {
@@ -68,18 +65,28 @@ func (u *StreamtapeUploader) Upload(filePath string) (string, error) {
 
 // UploadWithProgress uploads a file to Streamtape and reports progress through fn.
 func (u *StreamtapeUploader) UploadWithProgress(filePath string, progress ProgressFunc) (string, error) {
-	streamtapeSem <- struct{}{}
-	defer func() { <-streamtapeSem }()
-
-	uploadURL, err := u.getUploadURL()
-	if err != nil {
-		return "", fmt.Errorf("get upload URL: %w", err)
+	if u.login == "" || u.key == "" {
+		return "", fmt.Errorf("Streamtape login or key not configured")
 	}
 
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		if attempt > 1 {
 			time.Sleep(uploadBackoff(attempt-2, lastErr))
+		}
+
+		uploadURL, err := u.getUploadURL()
+		if err != nil {
+			lastErr = fmt.Errorf("get upload URL: %w", err)
+			if isUploadRateLimited(err) {
+				time.Sleep(uploadBackoff(attempt, err))
+				lastErr = nil
+				continue
+			}
+			if attempt < 3 {
+				continue
+			}
+			return "", lastErr
 		}
 
 		link, err := u.uploadFile(filePath, uploadURL, progress)

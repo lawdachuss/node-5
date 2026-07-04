@@ -1105,6 +1105,8 @@ func configuredUploadHosts() []string {
 		cfg.MixdropEmail,
 		cfg.MixdropToken,
 		cfg.SeekStreamingKey,
+		cfg.VidHideAPIKey,
+		cfg.StreamWishAPIKey,
 		nil,
 	)
 	return upl.AvailableHosts()
@@ -1170,6 +1172,8 @@ func UploadOrphanedFile(filePath, thumbURL, spriteURL, previewURL string) bool {
 		cfg.MixdropEmail,
 		cfg.MixdropToken,
 		cfg.SeekStreamingKey,
+		cfg.VidHideAPIKey,
+		cfg.StreamWishAPIKey,
 		nil, // no logger for orphan recovery
 	)
 

@@ -10,18 +10,16 @@ import (
 )
 
 const (
-	voeSXAPIBase = "https://voe.sx/api"
+	streamWishAPIBase = "https://api.streamwish.com/api"
 )
 
-// VoeSXUploader handles uploading files to VOE.sx
-type VoeSXUploader struct {
+type StreamWishUploader struct {
 	apiKey string
 	client *http.Client
 }
 
-// NewVoeSXUploader creates a new VOE.sx uploader instance
-func NewVoeSXUploader(apiKey string) *VoeSXUploader {
-	return &VoeSXUploader{
+func NewStreamWishUploader(apiKey string) *StreamWishUploader {
+	return &StreamWishUploader{
 		apiKey: apiKey,
 		client: &http.Client{
 			Timeout: 120 * time.Minute,
@@ -36,35 +34,32 @@ func NewVoeSXUploader(apiKey string) *VoeSXUploader {
 	}
 }
 
-type voeSXServerResponse struct {
+type streamWishServerResponse struct {
 	ServerTime string `json:"server_time"`
 	Msg        string `json:"msg"`
-	Message    string `json:"message"`
 	Status     int    `json:"status"`
-	Success    bool   `json:"success"`
 	Result     string `json:"result"`
 }
 
-type voeSXUploadResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	File    struct {
-		ID                int    `json:"id"`
-		FileCode          string `json:"file_code"`
-		FileTitle         string `json:"file_title"`
-		EncodingNecessary bool   `json:"encoding_necessary"`
-	} `json:"file"`
+type streamWishUploadFileEntry struct {
+	FileCode string `json:"filecode"`
+	Filename string `json:"filename"`
+	Status   string `json:"status"`
 }
 
-// Upload uploads a file to VOE.sx and returns the view link
-func (u *VoeSXUploader) Upload(filePath string) (string, error) {
+type streamWishUploadResponse struct {
+	Msg    string                     `json:"msg"`
+	Status int                        `json:"status"`
+	Files  []streamWishUploadFileEntry `json:"files"`
+}
+
+func (u *StreamWishUploader) Upload(filePath string) (string, error) {
 	return u.UploadWithProgress(filePath, nil)
 }
 
-// UploadWithProgress uploads a file to VOE.sx and reports progress through fn.
-func (u *VoeSXUploader) UploadWithProgress(filePath string, progress ProgressFunc) (string, error) {
+func (u *StreamWishUploader) UploadWithProgress(filePath string, progress ProgressFunc) (string, error) {
 	if u.apiKey == "" {
-		return "", fmt.Errorf("VOE.sx API key not configured")
+		return "", fmt.Errorf("StreamWish API key not configured")
 	}
 
 	var lastErr error
@@ -95,9 +90,8 @@ func (u *VoeSXUploader) UploadWithProgress(filePath string, progress ProgressFun
 	return "", lastErr
 }
 
-// getUploadServer gets the upload server URL from VOE.sx API
-func (u *VoeSXUploader) getUploadServer() (string, error) {
-	url := fmt.Sprintf("%s/upload/server?key=%s", voeSXAPIBase, u.apiKey)
+func (u *StreamWishUploader) getUploadServer() (string, error) {
+	url := fmt.Sprintf("%s/upload/server?key=%s", streamWishAPIBase, u.apiKey)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -115,13 +109,13 @@ func (u *VoeSXUploader) getUploadServer() (string, error) {
 		return "", fmt.Errorf("get upload server failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var serverResp voeSXServerResponse
+	var serverResp streamWishServerResponse
 	if err := json.NewDecoder(resp.Body).Decode(&serverResp); err != nil {
 		return "", fmt.Errorf("decode server response: %w", err)
 	}
 
-	if !serverResp.Success || serverResp.Status != 200 {
-		return "", fmt.Errorf("server status not ok: %s (msg: %s)", serverResp.Msg, serverResp.Message)
+	if serverResp.Status != 200 {
+		return "", fmt.Errorf("server status not ok: %s (msg: %s)", serverResp.Msg, serverResp.Msg)
 	}
 
 	if serverResp.Result == "" {
@@ -131,8 +125,7 @@ func (u *VoeSXUploader) getUploadServer() (string, error) {
 	return serverResp.Result, nil
 }
 
-func (u *VoeSXUploader) uploadFile(filePath string, progress ProgressFunc) (string, error) {
-	// Step 1: Get upload server
+func (u *StreamWishUploader) uploadFile(filePath string, progress ProgressFunc) (string, error) {
 	uploadServer, err := u.getUploadServer()
 	if err != nil {
 		return "", fmt.Errorf("get upload server: %w", err)
@@ -140,7 +133,7 @@ func (u *VoeSXUploader) uploadFile(filePath string, progress ProgressFunc) (stri
 
 	body, contentLen, contentType, file, err := multipartStreamWithProgress(
 		map[string]string{"key": u.apiKey},
-		"file", filePath, "VOE.sx", progress,
+		"file", filePath, "StreamWish", progress,
 	)
 	if err != nil {
 		return "", fmt.Errorf("multipart stream: %w", err)
@@ -166,19 +159,24 @@ func (u *VoeSXUploader) uploadFile(filePath string, progress ProgressFunc) (stri
 		return "", fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var uploadResp voeSXUploadResponse
+	var uploadResp streamWishUploadResponse
 	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
 		return "", fmt.Errorf("decode upload response: %w", err)
 	}
 
-	if !uploadResp.Success {
-		return "", fmt.Errorf("upload failed: %s", uploadResp.Message)
+	if uploadResp.Status != 200 {
+		return "", fmt.Errorf("upload failed: status %d — %s", uploadResp.Status, uploadResp.Msg)
 	}
 
-	if uploadResp.File.FileCode == "" {
+	if len(uploadResp.Files) == 0 {
+		return "", fmt.Errorf("no files in upload response")
+	}
+
+	fileCode := uploadResp.Files[0].FileCode
+	if fileCode == "" {
 		return "", fmt.Errorf("no file code in response")
 	}
 
-	viewURL := fmt.Sprintf("https://voe.sx/%s", uploadResp.File.FileCode)
+	viewURL := fmt.Sprintf("https://xvs.tt/%s", fileCode)
 	return viewURL, nil
 }

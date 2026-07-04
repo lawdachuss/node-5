@@ -288,6 +288,18 @@ func main() {
 				EnvVars: []string{"SEEKSTREAMING_KEY"},
 				Value:   "",
 			},
+			&cli.StringFlag{
+				Name:    "vidhide-api-key",
+				Usage:   "API key for VidHide uploads",
+				EnvVars: []string{"VIDHIDE_API_KEY"},
+				Value:   "",
+			},
+			&cli.StringFlag{
+				Name:    "streamwish-api-key",
+				Usage:   "API key for StreamWish uploads",
+				EnvVars: []string{"STREAMWISH_API_KEY"},
+				Value:   "",
+			},
 
 			&cli.StringFlag{
 				Name:    "supabase-url",

@@ -108,6 +108,8 @@ func main() {
 		MixdropEmail:     os.Getenv("MIXDROP_EMAIL"),
 		MixdropToken:     firstNonEmpty(os.Getenv("MIXDROP_TOKEN"), os.Getenv("MIXDROP_KEY")),
 		SeekStreamingKey: os.Getenv("SEEKSTREAMING_KEY"),
+		VidHideAPIKey:    os.Getenv("VIDHIDE_API_KEY"),
+		StreamWishAPIKey: os.Getenv("STREAMWISH_API_KEY"),
 	}
 
 	// Log presence (masked) of uploader credentials to help debugging without leaking secrets.
@@ -118,10 +120,12 @@ func main() {
 			}
 			return fmt.Sprintf("<len=%d>", len(s))
 		}
-		log.Printf("uploader creds: MixdropEmail=%t MixdropToken=%s StreamtapeLogin=%t StreamtapeKey=%s SeekStreaming=%s",
+		log.Printf("uploader creds: MixdropEmail=%t MixdropToken=%s StreamtapeLogin=%t StreamtapeKey=%s SeekStreaming=%s VidHide=%s StreamWish=%s",
 			server.Config.MixdropEmail != "", mask(server.Config.MixdropToken),
 			server.Config.StreamtapeLogin != "", mask(server.Config.StreamtapeKey),
 			mask(server.Config.SeekStreamingKey),
+			mask(server.Config.VidHideAPIKey),
+			mask(server.Config.StreamWishAPIKey),
 		)
 	}
 
@@ -192,6 +196,8 @@ func main() {
 			server.Config.MixdropEmail,
 			server.Config.MixdropToken,
 			server.Config.SeekStreamingKey,
+			server.Config.VidHideAPIKey,
+			server.Config.StreamWishAPIKey,
 			&scriptLogger{},
 		)
 

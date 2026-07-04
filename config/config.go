@@ -230,6 +230,8 @@ func New(c *cli.Context) (*entity.Config, error) {
 		MixdropEmail:            c.String("mixdrop-email"),
 		MixdropToken:            c.String("mixdrop-token"),
 		SeekStreamingKey:        c.String("seekstreaming-key"),
+		VidHideAPIKey:           c.String("vidhide-api-key"),
+		StreamWishAPIKey:        c.String("streamwish-api-key"),
 
 		SupabaseURL:    c.String("supabase-url"),
 		SupabaseAPIKey: c.String("supabase-api-key"),
