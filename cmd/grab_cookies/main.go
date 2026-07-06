@@ -61,10 +61,9 @@ func main() {
 		}
 	}
 	if len(workingURLs) == 0 {
-		fmt.Println("  [WARN] No working proxies, will try each anyway")
-		for _, p := range proxies {
-			workingURLs = append(workingURLs, p.URL)
-		}
+		fmt.Println("\n[FAIL] No working proxies found — cannot bypass face-id verification")
+		exitCode = 1
+		return
 	}
 
 	// Track best attempt — if we get any cookies (even without fresh cf_clearance),

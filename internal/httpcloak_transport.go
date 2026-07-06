@@ -351,9 +351,18 @@ func (t *httpcloakTransport) roundTripOnce(req *http.Request) (*http.Response, e
 // RoundTrip implements http.RoundTripper. CDN requests bypass the proxy
 // entirely. API requests use httpcloak with the SOCKS5 proxy, and
 // automatically rotate to the next proxy on connection failure.
+// Returns error immediately if no proxies are configured — never falls back
+// to direct connection (which would fail face-id verification).
 func (t *httpcloakTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL.Scheme == "http" || isCDNHost(req.URL.Host) || isProxyBypassHost(req.URL.Host) {
 		return http.DefaultTransport.RoundTrip(req)
+	}
+
+	t.mu.Lock()
+	noProxy := len(t.proxyURLs) == 0
+	t.mu.Unlock()
+	if noProxy {
+		return nil, fmt.Errorf("no proxy available — cannot reach %s without SOCKS5 proxy (direct connection blocked by face-id)", req.URL.Host)
 	}
 
 	ctx := req.Context()
