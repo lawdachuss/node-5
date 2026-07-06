@@ -8,20 +8,19 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sardanioss/httpcloak"
 )
 
-// ProxyResult represents a tested proxy.
 type ProxyResult struct {
-	URL     string
+	URL      string
 	EgressIP string
-	Country string
-	OK      bool
+	Country  string
+	OK       bool
 }
 
-// proxySources are URLs that return plain-text lists of SOCKS5 proxies.
 var proxySources = []string{
 	"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=nl&timeout=5000",
 	"https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&format=text&protocol=socks5&country=in&timeout=5000",
@@ -31,7 +30,6 @@ var proxySources = []string{
 	"https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/countries/nl/socks5/data.txt",
 }
 
-// cfg cache
 var (
 	cachedProxies []ProxyResult
 	cacheTime     time.Time
@@ -39,9 +37,9 @@ var (
 	cacheTTL      = 5 * time.Minute
 )
 
-// FetchProxies fetches SOCKS5 proxies from public lists, tests them using
-// httpcloak (Chrome 146), and returns working proxies sorted by preference
-// (NL first, then IN, DE, others).
+// FetchProxies fetches SOCKS5 proxies from public lists, tests them
+// concurrently using httpcloak (Chrome 146), and returns as soon as
+// `limit` working proxies are found (or all are exhausted).
 func FetchProxies(ctx context.Context, limit int) ([]ProxyResult, error) {
 	cacheMu.Lock()
 	if len(cachedProxies) > 0 && time.Since(cacheTime) < cacheTTL {
@@ -56,64 +54,59 @@ func FetchProxies(ctx context.Context, limit int) ([]ProxyResult, error) {
 		return nil, fmt.Errorf("no proxies fetched from any source")
 	}
 
-	// Only test a subset to avoid 5+ minute runs
-	if len(allURLs) > 100 {
-		allURLs = allURLs[:100]
-	}
+	fmt.Printf("[proxy] scanning %d proxies, need %d...\n", len(allURLs), limit)
 
-	fmt.Printf("[proxy] testing %d proxies for liveness...\n", len(allURLs))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	var mu sync.Mutex
-	var alive []string
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 20)
+	var (
+		results   []ProxyResult
+		resultsMu sync.Mutex
+		needed    = limit
+		found     atomic.Int32
+		sem       = make(chan struct{}, 20)
+		wg        sync.WaitGroup
+	)
 
 	for _, u := range allURLs {
+		if found.Load() >= int32(needed) {
+			break
+		}
 		wg.Add(1)
 		sem <- struct{}{}
+
 		go func(proxyURL string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			egress := checkProxyEgress(ctx, proxyURL)
-			if egress != "" {
-				mu.Lock()
-				alive = append(alive, proxyURL)
-				mu.Unlock()
+
+			if found.Load() >= int32(needed) {
+				return
 			}
+
+			r := testProxy(ctx, proxyURL)
+			if !r.OK {
+				return
+			}
+
+			resultsMu.Lock()
+			if found.Load() < int32(needed) {
+				results = append(results, r)
+				n := found.Add(1)
+				fmt.Printf("[proxy] found %d/%d: %s [%s]\n", n, needed, proxyURL, r.Country)
+				if n >= int32(needed) {
+					cancel()
+				}
+			}
+			resultsMu.Unlock()
 		}(u)
 	}
 	wg.Wait()
 
-	fmt.Printf("[proxy] %d proxies alive, testing Chaturbate reachability...\n", len(alive))
-
-	var results []ProxyResult
-	var resultsMu sync.Mutex
-	var wg2 sync.WaitGroup
-	sem2 := make(chan struct{}, 10)
-
-	for _, u := range alive {
-		wg2.Add(1)
-		sem2 <- struct{}{}
-		go func(proxyURL string) {
-			defer wg2.Done()
-			defer func() { <-sem2 }()
-			r := testChaturbateReachability(ctx, proxyURL)
-			if r.OK {
-				resultsMu.Lock()
-				results = append(results, r)
-				resultsMu.Unlock()
-			}
-		}(u)
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no working proxies found after scanning %d", len(allURLs))
 	}
-	wg2.Wait()
-
-	fmt.Printf("[proxy] %d proxies reach Chaturbate\n", len(results))
 
 	results = sortProxies(results)
-
-	if limit > 0 && len(results) > limit {
-		results = results[:limit]
-	}
 
 	cacheMu.Lock()
 	cachedProxies = append([]ProxyResult{}, results...)
@@ -121,6 +114,76 @@ func FetchProxies(ctx context.Context, limit int) ([]ProxyResult, error) {
 	cacheMu.Unlock()
 
 	return results, nil
+}
+
+func testProxy(ctx context.Context, proxyURL string) ProxyResult {
+	opts := []httpcloak.Option{
+		httpcloak.WithTimeout(12 * time.Second),
+		httpcloak.WithProxy(proxyURL),
+	}
+	client := httpcloak.New("chrome-146-windows", opts...)
+	if c, ok := interface{}(client).(interface{ Close() error }); ok {
+		defer c.Close()
+	}
+
+	// Egress check
+	egressIP := checkEgress(ctx, client)
+	if egressIP == "" {
+		return ProxyResult{URL: proxyURL, OK: false}
+	}
+
+	// Chaturbate reachability
+	ok := checkChaturbate(ctx, client)
+
+	return ProxyResult{
+		URL:      proxyURL,
+		EgressIP: egressIP,
+		Country:  lookupCountry(egressIP),
+		OK:       ok,
+	}
+}
+
+func checkEgress(ctx context.Context, client *httpcloak.Client) string {
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resp, err := client.Do(reqCtx, &httpcloak.Request{
+		Method:  "GET",
+		URL:     "https://api.ipify.org",
+		Timeout: 10 * time.Second,
+	})
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return strings.TrimSpace(string(body))
+}
+
+func checkChaturbate(ctx context.Context, client *httpcloak.Client) bool {
+	reqCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	resp, err := client.Do(reqCtx, &httpcloak.Request{
+		Method:  "GET",
+		URL:     "https://chaturbate.com",
+		Timeout: 12 * time.Second,
+	})
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return false
+	}
+
+	if loc, ok := resp.Headers["Location"]; ok && len(loc) > 0 {
+		lower := strings.ToLower(loc[0])
+		if strings.Contains(lower, "verify") || strings.Contains(lower, "captcha") ||
+			strings.Contains(lower, "face") || strings.Contains(lower, "human") {
+			return false
+		}
+	}
+	return true
 }
 
 func fetchAllProxyURLs(ctx context.Context) []string {
@@ -174,79 +237,8 @@ func fetchAllProxyURLs(ctx context.Context) []string {
 	}
 	wg.Wait()
 
-	// Shuffle for random ordering
 	rand.Shuffle(len(all), func(i, j int) { all[i], all[j] = all[j], all[i] })
 	return all
-}
-
-func checkProxyEgress(ctx context.Context, proxyURL string) string {
-	opts := []httpcloak.Option{
-		httpcloak.WithTimeout(10 * time.Second),
-		httpcloak.WithProxy(proxyURL),
-	}
-	client := httpcloak.New("chrome-146-windows", opts...)
-	if c, ok := interface{}(client).(interface{ Close() error }); ok {
-		defer c.Close()
-	}
-	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	resp, err := client.Do(reqCtx, &httpcloak.Request{
-		Method: "GET",
-		URL:    "https://api.ipify.org",
-		Timeout: 10 * time.Second,
-	})
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return strings.TrimSpace(string(body))
-}
-
-func testChaturbateReachability(ctx context.Context, proxyURL string) ProxyResult {
-	opts := []httpcloak.Option{
-		httpcloak.WithTimeout(15 * time.Second),
-		httpcloak.WithProxy(proxyURL),
-	}
-	client := httpcloak.New("chrome-146-windows", opts...)
-	if c, ok := interface{}(client).(interface{ Close() error }); ok {
-		defer c.Close()
-	}
-
-	// First get the egress IP
-	egressIP := checkProxyEgress(ctx, proxyURL)
-
-	// Test Chaturbate homepage
-	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	resp, err := client.Do(reqCtx, &httpcloak.Request{
-		Method: "GET",
-		URL:    "https://chaturbate.com",
-		Timeout: 15 * time.Second,
-	})
-	if err != nil {
-		return ProxyResult{URL: proxyURL, EgressIP: egressIP, OK: false}
-	}
-	defer resp.Body.Close()
-
-	statusOK := resp.StatusCode == 200
-
-	// Check for face-id / captcha redirect
-	blocked := false
-	if loc, ok := resp.Headers["Location"]; ok && len(loc) > 0 {
-		lower := strings.ToLower(loc[0])
-		if strings.Contains(lower, "verify") || strings.Contains(lower, "captcha") ||
-			strings.Contains(lower, "face") || strings.Contains(lower, "human") {
-			blocked = true
-		}
-	}
-
-	return ProxyResult{
-		URL:      proxyURL,
-		EgressIP: egressIP,
-		Country:  lookupCountry(egressIP),
-		OK:       statusOK && !blocked,
-	}
 }
 
 func lookupCountry(ip string) string {
