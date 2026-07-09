@@ -407,7 +407,9 @@ type UpdateConfigRequest struct {
 	SeekStreamingKey string `json:"seekstreaming_key" form:"seekstreaming_key"`
 	VidHideAPIKey    string `json:"vidhide_api_key" form:"vidhide_api_key"`
 	StreamWishAPIKey string `json:"streamwish_api_key" form:"streamwish_api_key"`
-	StripchatPDKey   string `json:"stripchat_pdkey" form:"stripchat_pdkey"`
+	UpnshareKey       string `json:"upnshare_key" form:"upnshare_key"`
+	DoodStreamAPIKey  string `json:"doodstream_api_key" form:"doodstream_api_key"`
+	StripchatPDKey    string `json:"stripchat_pdkey" form:"stripchat_pdkey"`
 }
 
 // UpdateConfig updates the server configuration from the Web UI form or API POST.
@@ -473,9 +475,9 @@ func UpdateConfig(c *gin.Context) {
 
 	// Update uploader credentials
 	if req.VoeSXAPIKey != "" || req.StreamtapeLogin != "" || req.StreamtapeKey != "" || req.MixdropEmail != "" || req.MixdropToken != "" ||
-		req.SeekStreamingKey != "" || req.VidHideAPIKey != "" || req.StreamWishAPIKey != "" {
+		req.SeekStreamingKey != "" || req.VidHideAPIKey != "" || req.StreamWishAPIKey != "" || req.UpnshareKey != "" || req.DoodStreamAPIKey != "" {
 		server.UpdateUploaderCredentials(req.VoeSXAPIKey, req.StreamtapeLogin, req.StreamtapeKey, req.MixdropEmail, req.MixdropToken,
-			req.SeekStreamingKey, req.VidHideAPIKey, req.StreamWishAPIKey)
+			req.SeekStreamingKey, req.VidHideAPIKey, req.StreamWishAPIKey, req.DoodStreamAPIKey, req.UpnshareKey)
 	}
 
 	if err := server.SaveSettings(); err != nil {
@@ -951,6 +953,16 @@ func embedURLForHostLink(host, link string) string {
 			return "https://masukestin.com/e/" + code
 		}
 	}
+	if strings.Contains(normalizedHost, "upnshare") || strings.Contains(normalizedLink, "upnshare.com/") {
+		if code := extractFileCode(link); code != "" {
+			return "https://upnshare.com/embed/" + code
+		}
+	}
+	if strings.Contains(normalizedHost, "doodstream") || strings.Contains(normalizedHost, "dood") || strings.Contains(normalizedLink, "dood.to/") || strings.Contains(normalizedLink, "doodapi") {
+		if code := extractFileCode(link); code != "" {
+			return "https://dood.to/e/" + code
+		}
+	}
 	return ""
 }
 
@@ -988,6 +1000,16 @@ func videoURLForHostLink(host, link string) string {
 	case strings.Contains(normalizedHost, "streamwish") || strings.Contains(normalizedLink, "hanerix.com/") || strings.Contains(normalizedLink, "masukestin.com/"):
 		if code := extractFileCode(link); code != "" {
 			return "https://masukestin.com/e/" + code
+		}
+		return link
+	case strings.Contains(normalizedHost, "upnshare") || strings.Contains(normalizedLink, "upnshare.com/"):
+		if code := extractFileCode(link); code != "" {
+			return "https://upnshare.com/embed/" + code
+		}
+		return link
+	case strings.Contains(normalizedHost, "doodstream") || strings.Contains(normalizedHost, "dood") || strings.Contains(normalizedLink, "dood.to/") || strings.Contains(normalizedLink, "doodapi"):
+		if code := extractFileCode(link); code != "" {
+			return "https://dood.to/e/" + code
 		}
 		return link
 	default:
@@ -1573,6 +1595,10 @@ func RemoveFromPool(c *gin.Context) {
 	// Also delete from channels table (isolated mode leftovers) so the
 	// channel is fully removed from the system.
 	_ = client.DeleteChannel(req.Username)
+
+	// Clean the legacy isolated-mode blob so migrateLegacyChannels
+	// won't re-insert this channel on the next startup.
+	_ = server.ClearLegacyChannelsBlob()
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

@@ -50,8 +50,14 @@ func PostChaturbateAPI(ctx context.Context, username string) (string, error) {
 			return err
 		}
 
-		// Set headers
-		userAgent := server.Config.UserAgent
+		// Read config under lock since cookies may be refreshed concurrently
+		// during proxy rotation (Scrapling cookie refresh).
+		server.ConfigMu.RLock()
+		cfgUserAgent := server.Config.UserAgent
+		cfgCookies := server.Config.Cookies
+		server.ConfigMu.RUnlock()
+
+		userAgent := cfgUserAgent
 		if userAgent == "" {
 			userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 		}
@@ -74,13 +80,13 @@ func PostChaturbateAPI(ctx context.Context, username string) (string, error) {
 		req.Header.Set("Origin", "https://chaturbate.com")
 
 		sanitized := ""
-		if server.Config.Cookies != "" {
+		if cfgCookies != "" {
 			sanitized = strings.Map(func(r rune) rune {
 				if r == '\n' || r == '\r' || r == '\t' || r < 32 {
 					return -1
 				}
 				return r
-			}, server.Config.Cookies)
+			}, cfgCookies)
 			sanitized = strings.TrimSpace(sanitized)
 		}
 		csrfToken := CSRFTokenForRequest(sanitized)

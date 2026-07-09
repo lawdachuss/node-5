@@ -886,6 +886,9 @@ var LOG_MSG_RULES = [
     { re: /^vidhide:/i,                        type: 'upload',    color: '#fb923c' },
     { re: /^streamwish:/i,                     type: 'upload',    color: '#67e8f9' },
     { re: /^seekstreaming:/i,                  type: 'upload',    color: '#f0abfc' },
+    { re: /^upnshare:/i,                       type: 'upload',    color: '#6ee7b7' },
+    { re: /^doodstream:/i,                     type: 'upload',    color: '#f97316' },
+
     // Compress
     { re: /^compress:/i,                       type: 'compress',  color: '#c084fc' },
     { re: /^encoding/i,                        type: 'compress',  color: '#c084fc' },
@@ -970,8 +973,10 @@ function highlightMsg(msg, baseColor) {
         'VidHide':      { fg: '#fb923c', bg: 'rgba(251,146,60,0.12)'   },  // orange
         'StreamWish':   { fg: '#67e8f9', bg: 'rgba(103,232,249,0.1)'   },  // cyan
         'SeekStreaming':{ fg: '#f0abfc', bg: 'rgba(240,171,252,0.1)'   },  // light purple
+        'UPnShare':     { fg: '#6ee7b7', bg: 'rgba(110,231,183,0.12)'  },  // green
+        'DoodStream':   { fg: '#f97316', bg: 'rgba(249,115,22,0.12)'   },  // orange
     };
-    safe = safe.replace(/\[(GoFile|VOE\.sx|VoeSX|TurboViPlay|GitHub|Streamtape|Mixdrop|VidHide|StreamWish|SeekStreaming)\]/g,
+    safe = safe.replace(/\[(GoFile|VOE\.sx|VoeSX|TurboViPlay|GitHub|Streamtape|Mixdrop|VidHide|StreamWish|SeekStreaming|UPnShare|DoodStream)\]/g,
         function(m, host) {
             var c = HOST_COLORS[host] || { fg: '#94a3b8', bg: 'rgba(148,163,184,0.1)' };
             return '<span style="color:' + c.fg + ';background:' + c.bg + ';padding:0 4px;border-radius:3px;font-size:10px;font-weight:600">[' + host + ']</span>';

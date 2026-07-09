@@ -74,6 +74,7 @@ type Channel struct {
 	videoSegmentCount int        // tracks video segments written to current file
 	audioSegmentCount int        // tracks audio segments written to current file
 	cleanupMu         sync.Mutex // serialises Cleanup() calls from concurrent goroutines
+	skipMinDurOnExit  bool       // set when context is cancelled; skip min-duration on cleanup
 	pendingFiles      []pendingFile
 	pendingWg         sync.WaitGroup // tracks async pending-file processing goroutine
 	UploadWg          sync.WaitGroup // tracks in-flight upload goroutines for graceful shutdown

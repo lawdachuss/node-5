@@ -1306,6 +1306,13 @@ func (c *Client) GetAllSettingKeys(likePattern string) ([]string, error) {
 	return matches, nil
 }
 
+// DeleteLegacyChannelsBlob deletes the legacy isolated-mode channels blob
+// from app_settings. The old blob would cause migrateLegacyChannels to
+// re-insert channels into the pool on every startup.
+func (c *Client) DeleteLegacyChannelsBlob(key string) error {
+	return c.delete("/app_settings?key=eq." + key)
+}
+
 // joinEscaped joins strings with Supabase-compatible CSV escaping.
 func joinEscaped(items []string) string {
 	escaped := make([]string, len(items))

@@ -99,17 +99,34 @@ func main() {
 	}
 
 	// Build server.Config from env
+	splitCS := func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		parts := strings.Split(s, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			v := strings.TrimSpace(p)
+			if v != "" {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+
 	server.Config = &entity.Config{
-		SupabaseURL:      os.Getenv("SUPABASE_URL"),
-		SupabaseAPIKey:   os.Getenv("SUPABASE_API_KEY"),
-		VoeSXAPIKey:      os.Getenv("VOESX_API_KEY"),
-		StreamtapeLogin:  os.Getenv("STREAMTAPE_LOGIN"),
-		StreamtapeKey:    os.Getenv("STREAMTAPE_KEY"),
-		MixdropEmail:     os.Getenv("MIXDROP_EMAIL"),
-		MixdropToken:     firstNonEmpty(os.Getenv("MIXDROP_TOKEN"), os.Getenv("MIXDROP_KEY")),
-		SeekStreamingKey: os.Getenv("SEEKSTREAMING_KEY"),
-		VidHideAPIKey:    os.Getenv("VIDHIDE_API_KEY"),
-		StreamWishAPIKey: os.Getenv("STREAMWISH_API_KEY"),
+		SupabaseURL:       os.Getenv("SUPABASE_URL"),
+		SupabaseAPIKey:    os.Getenv("SUPABASE_API_KEY"),
+		VoeSXAPIKey:       os.Getenv("VOESX_API_KEY"),
+		StreamtapeLogin:   os.Getenv("STREAMTAPE_LOGIN"),
+		StreamtapeKey:     os.Getenv("STREAMTAPE_KEY"),
+		MixdropEmail:      os.Getenv("MIXDROP_EMAIL"),
+		MixdropToken:      firstNonEmpty(os.Getenv("MIXDROP_TOKEN"), os.Getenv("MIXDROP_KEY")),
+		SeekStreamingKey:  os.Getenv("SEEKSTREAMING_KEY"),
+		VidHideAPIKeys:    splitCS(os.Getenv("VIDHIDE_API_KEY")),
+		StreamWishAPIKeys: splitCS(os.Getenv("STREAMWISH_API_KEY")),
+		UpnshareKeys:      splitCS(os.Getenv("UPNSHARE_KEY")),
+		DoodStreamAPIKeys: splitCS(os.Getenv("DOODSTREAM_API_KEY")),
 	}
 
 	// Log presence (masked) of uploader credentials to help debugging without leaking secrets.
@@ -120,12 +137,14 @@ func main() {
 			}
 			return fmt.Sprintf("<len=%d>", len(s))
 		}
-		log.Printf("uploader creds: MixdropEmail=%t MixdropToken=%s StreamtapeLogin=%t StreamtapeKey=%s SeekStreaming=%s VidHide=%s StreamWish=%s",
+		log.Printf("uploader creds: MixdropEmail=%t MixdropToken=%s StreamtapeLogin=%t StreamtapeKey=%s SeekStreaming=%s VidHide=%s StreamWish=%s Upnshare=%s DoodStream=%s",
 			server.Config.MixdropEmail != "", mask(server.Config.MixdropToken),
 			server.Config.StreamtapeLogin != "", mask(server.Config.StreamtapeKey),
 			mask(server.Config.SeekStreamingKey),
 			mask(strings.Join(server.Config.VidHideAPIKeys, ",")),
 			mask(strings.Join(server.Config.StreamWishAPIKeys, ",")),
+			mask(strings.Join(server.Config.UpnshareKeys, ",")),
+			mask(strings.Join(server.Config.DoodStreamAPIKeys, ",")),
 		)
 	}
 
@@ -198,7 +217,9 @@ func main() {
 			server.Config.SeekStreamingKey,
 			server.Config.VidHideAPIKeys,
 			server.Config.StreamWishAPIKeys,
+			server.Config.DoodStreamAPIKeys,
 			&scriptLogger{},
+			server.Config.UpnshareKeys,
 		)
 
 		results := upl.UploadToAll(p)

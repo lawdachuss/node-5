@@ -38,6 +38,10 @@ func embedURLFromLink(host, link string) string {
 		if code != "" {
 			return "https://masukestin.com/e/" + code
 		}
+	case "UPnShare":
+		return link
+	case "DoodStream":
+		return link
 	}
 	return ""
 }
@@ -99,7 +103,9 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL, previewURL s
 		cfg.SeekStreamingKey,
 		cfg.VidHideAPIKeys,
 		cfg.StreamWishAPIKeys,
+		cfg.DoodStreamAPIKeys,
 		ch, // Channel implements uploader.Logger
+		cfg.UpnshareKeys,
 	)
 
 	allHosts := upl.AvailableHosts()

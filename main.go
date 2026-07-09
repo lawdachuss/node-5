@@ -318,7 +318,18 @@ func main() {
 				EnvVars: []string{"STREAMWISH_API_KEY"},
 				Value:   "",
 			},
-
+			&cli.StringFlag{
+				Name:    "upnshare-key",
+				Usage:   "API key for UPnShare uploads",
+				EnvVars: []string{"UPNSHARE_KEY"},
+				Value:   "",
+			},
+			&cli.StringFlag{
+				Name:    "doodstream-api-key",
+				Usage:   "API key for DoodStream uploads",
+				EnvVars: []string{"DOODSTREAM_API_KEY"},
+				Value:   "",
+			},
 			&cli.StringFlag{
 				Name:    "supabase-url",
 				Usage:   "Supabase project URL for remote data persistence (REST API fallback)",

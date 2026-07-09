@@ -199,7 +199,9 @@ func (p *Pipeline) stageUploadVideos(ch *Channel) error {
 		cfg.SeekStreamingKey,
 		cfg.VidHideAPIKeys,
 		cfg.StreamWishAPIKeys,
+		cfg.DoodStreamAPIKeys,
 		ch,
+		cfg.UpnshareKeys,
 	)
 
 	allHosts := upl.AvailableHosts()

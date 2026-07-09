@@ -318,6 +318,9 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					previewMP4,
 				).Run()
 			} else {
+				// Detect PTS offset (e.g. LL-HLS fMP4 segments carry absolute
+				// server timestamps).  trim=start=X uses PTS, so we must adjust.
+				ptsOffset := probeFirstPTSOffset(videoPath)
 				segDuration := previewDuration / float64(previewSegments)
 				step := dur / float64(previewSegments)
 
@@ -338,7 +341,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 					label := fmt.Sprintf("v%d", i)
 					filterParts = append(filterParts, fmt.Sprintf(
 						"[0:v]trim=start=%.3f:duration=%.3f,setpts=PTS-STARTPTS,scale=%d:-2:flags=lanczos[%s]",
-						start, segDuration, previewWidth, label,
+						ptsOffset+start, segDuration, previewWidth, label,
 					))
 					concatInputs = append(concatInputs, fmt.Sprintf("[%s]", label))
 				}
@@ -464,4 +467,34 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	previewURL = <-previewDone
 
 	return thumbURL, spriteURL, previewURL
+}
+
+// probeFirstPTSOffset returns the PTS of the first video frame, or 0 if it
+// cannot be determined.  LL-HLS fMP4 segments may carry absolute server
+// timestamps (e.g. starting at 5044s), which causes trim=start=X to select
+// wrong frames since trim uses PTS values.
+func probeFirstPTSOffset(videoPath string) float64 {
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer probeCancel()
+	config.AcquireFFmpeg()
+	defer config.ReleaseFFmpeg()
+	out, err := config.FFprobeCommandContext(probeCtx,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "frame=pkt_pts_time",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		"-read_intervals", "%+#1",
+		videoPath,
+	).Output()
+	if err != nil {
+		return 0
+	}
+	pts, parseErr := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if parseErr != nil {
+		return 0
+	}
+	if pts <= 0 {
+		return 0
+	}
+	return pts
 }

@@ -418,6 +418,10 @@ func (m *Manager) migrateLegacyChannels(client *database.Client) (int, error) {
 		return 0, fmt.Errorf("bulk insert assignments: %w", err)
 	}
 
+	if err := server.ClearLegacyChannelsBlob(); err != nil {
+		fmt.Printf("[manager] warning: could not clear legacy channels blob: %v\n", err)
+	}
+
 	fmt.Printf("[manager] migrateLegacyChannels: migrated %d channel(s) to channel_assignments\n", len(assignments))
 	return len(assignments), nil
 }

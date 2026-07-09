@@ -77,6 +77,14 @@ func channelsKey() string {
 	return "channels_" + instanceID
 }
 
+func ClearLegacyChannelsBlob() error {
+	client := GetDBClient()
+	if client == nil {
+		return fmt.Errorf("Supabase not configured")
+	}
+	return client.DeleteLegacyChannelsBlob(channelsKey())
+}
+
 // ─── Supabase client ──────────────────────────────────────────────────────────
 
 var dbClient *database.Client

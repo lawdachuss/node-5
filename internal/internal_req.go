@@ -257,17 +257,25 @@ func CreateRequestWithTimeout(ctx context.Context, url string, timeout time.Dura
 func SetRequestHeaders(req *http.Request) {
 	req.Header.Set("X-Requested-With", "XMLHttpRequest") // Helps avoid Age Verification redirect
 
-	if server.Config.UserAgent != "" {
-		req.Header.Set("User-Agent", strings.TrimSpace(server.Config.UserAgent))
+	// Read config fields under read lock since cookies may be updated
+	// concurrently during proxy rotation (Scrapling cookie refresh).
+	server.ConfigMu.RLock()
+	userAgent := server.Config.UserAgent
+	cookieStr := server.Config.Cookies
+	domain := server.Config.Domain
+	server.ConfigMu.RUnlock()
+
+	if userAgent != "" {
+		req.Header.Set("User-Agent", strings.TrimSpace(userAgent))
 	}
-	if server.Config.Cookies != "" {
-		cookies := ParseCookies(server.Config.Cookies)
+	if cookieStr != "" {
+		cookies := ParseCookies(cookieStr)
 		for name, value := range cookies {
 			req.AddCookie(&http.Cookie{Name: name, Value: value})
 		}
 	}
 
-	domain := strings.TrimRight(server.Config.Domain, "/")
+	domain = strings.TrimRight(domain, "/")
 	if domain != "" {
 		req.Header.Set("Origin", domain)
 		req.Header.Set("Referer", domain+"/")

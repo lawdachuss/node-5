@@ -214,6 +214,7 @@ func (ch *Channel) cleanupOnExit(ctx context.Context) {
 	mode := CloseProcess
 	if ctx.Err() != nil {
 		mode = CloseQueue
+		ch.skipMinDurOnExit = true
 	}
 	if err := ch.Cleanup(mode); err != nil {
 		ch.Error("cleanup on record stream exit: %s", err.Error())

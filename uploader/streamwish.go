@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -75,6 +76,7 @@ func (u *StreamWishUploader) UploadWithProgress(filePath string, progress Progre
 				lastErr = fmt.Errorf("upload file: %w", err)
 				// Permanent error (quota) — rotate to next key
 				if IsPermanentError(err) {
+					u.cachedServer = "" // clear cached server so next key gets its own
 					u.keys.rotate()
 					break // break inner retry loop, try next key
 				}
@@ -220,6 +222,49 @@ func (u *StreamWishUploader) uploadFile(filePath string, progress ProgressFunc, 
 		return "", fmt.Errorf("no file code in response (body: %s)", string(rawBody))
 	}
 
-	viewURL := fmt.Sprintf("https://masukestin.com/%s", fileCode)
-	return viewURL, nil
+	embedURL := u.getEmbedURL(fileCode)
+	return embedURL, nil
+}
+
+func (u *StreamWishUploader) getEmbedURL(fileCode string) string {
+	apiKey := u.keys.current()
+	apiURL := fmt.Sprintf("%s/file/list?key=%s&file_code=%s&per_page=1", streamWishAPIBase, apiKey, fileCode)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return fmt.Sprintf("https://masukestin.com/e/%s", fileCode)
+	}
+	req.Header.Set("User-Agent", defaultUserAgent)
+
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("https://masukestin.com/e/%s", fileCode)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("https://masukestin.com/e/%s", fileCode)
+	}
+
+	var listResp struct {
+		Status int `json:"status"`
+		Result struct {
+			Files []struct {
+				FileCode string `json:"file_code"`
+				Link     string `json:"link"`
+			} `json:"files"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		return fmt.Sprintf("https://masukestin.com/e/%s", fileCode)
+	}
+
+	if listResp.Status == 200 && len(listResp.Result.Files) > 0 && listResp.Result.Files[0].Link != "" {
+		parsed, err := url.Parse(listResp.Result.Files[0].Link)
+		if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			return fmt.Sprintf("%s://%s/e/%s", parsed.Scheme, parsed.Host, fileCode)
+		}
+	}
+
+	return fmt.Sprintf("https://masukestin.com/e/%s", fileCode)
 }

@@ -712,6 +712,8 @@ jobs:
             "# Upload host API keys",
             "`$env:VIDHIDE_API_KEY = `"${{ secrets.VIDHIDE_API_KEY }}`"",
             "`$env:STREAMWISH_API_KEY = `"${{ secrets.STREAMWISH_API_KEY }}`"",
+            "`$env:UPNSHARE_KEY = `"${{ secrets.UPNSHARE_KEY }}`"",
+            "`$env:DOODSTREAM_API_KEY = `"${{ secrets.DOODSTREAM_API_KEY }}`"",
             "`$env:USER_AGENT = `"$env:USER_AGENT`"",
             "# Disable HTTP_PROXY/HTTPS_PROXY for Go's default transport",
             "# to prevent Go from trying to use SOCKS5 as HTTP proxy.",

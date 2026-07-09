@@ -178,8 +178,10 @@ type Config struct {
 	MixdropEmail     string
 	MixdropToken     string
 	SeekStreamingKey string
-	VidHideAPIKeys    []string
-	StreamWishAPIKeys []string
+	VidHideAPIKeys     []string
+	StreamWishAPIKeys  []string
+	DoodStreamAPIKeys  []string
+	UpnshareKeys       []string
 
 	SupabaseURL    string
 	SupabaseAPIKey string

@@ -9,55 +9,53 @@ import (
 	"time"
 )
 
-const (
-	vidHideAPIBase = "https://earnvidsapi.com/api"
-)
+const doodStreamAPIBase = "https://doodapi.co/api"
 
-type VidHideUploader struct {
+type DoodStreamUploader struct {
 	keys         *keyRing
 	client       *http.Client
-	cachedServer string // cached upload server URL to skip getUploadServer on retries
+	cachedServer string
 }
 
-func NewVidHideUploader(apiKeys []string) *VidHideUploader {
-	return &VidHideUploader{
+func NewDoodStreamUploader(apiKeys []string) *DoodStreamUploader {
+	return &DoodStreamUploader{
 		keys:   newKeyRing(apiKeys),
 		client: newDirectClient(120 * time.Minute),
 	}
 }
 
-type vidHideServerResponse struct {
-	ServerTime string `json:"server_time"`
+type doodStreamServerResponse struct {
 	Msg        string `json:"msg"`
 	Status     int    `json:"status"`
 	Result     string `json:"result"`
+	ServerTime string `json:"server_time"`
 }
 
-type vidHideUploadFileEntry struct {
-	FileCode string `json:"filecode"`
-	Filename string `json:"filename"`
-	Status   string `json:"status"`
+type doodStreamUploadResult struct {
+	DownloadURL string `json:"download_url"`
+	FileCode    string `json:"filecode"`
+	Status      int    `json:"status"`
+	Title       string `json:"title"`
 }
 
-type vidHideUploadResponse struct {
-	Msg    string                  `json:"msg"`
-	Status int                     `json:"status"`
-	Files  []vidHideUploadFileEntry `json:"files"`
+type doodStreamUploadResponse struct {
+	Msg        string                   `json:"msg"`
+	Status     int                      `json:"status"`
+	Result     []doodStreamUploadResult `json:"result"`
+	ServerTime string                   `json:"server_time"`
 }
 
-func (u *VidHideUploader) Upload(filePath string) (string, error) {
+func (u *DoodStreamUploader) Upload(filePath string) (string, error) {
 	return u.UploadWithProgress(filePath, nil)
 }
 
-// Keys returns the current key ring (for testing/debugging).
-func (u *VidHideUploader) Keys() *keyRing { return u.keys }
+func (u *DoodStreamUploader) Keys() *keyRing { return u.keys }
 
-func (u *VidHideUploader) UploadWithProgress(filePath string, progress ProgressFunc) (string, error) {
+func (u *DoodStreamUploader) UploadWithProgress(filePath string, progress ProgressFunc) (string, error) {
 	if u.keys.count() == 0 {
-		return "", fmt.Errorf("VidHide API key not configured")
+		return "", fmt.Errorf("DoodStream API key not configured")
 	}
 
-	// Try each key at most once; on permanent (quota) error, rotate to next key.
 	attempts := u.keys.count()
 	maxRetriesPerKey := 3
 	var lastErr error
@@ -73,7 +71,7 @@ func (u *VidHideUploader) UploadWithProgress(filePath string, progress ProgressF
 			if err != nil {
 				lastErr = fmt.Errorf("upload file: %w", err)
 				if IsPermanentError(err) {
-					u.cachedServer = "" // clear cached server so next key gets its own
+					u.cachedServer = ""
 					u.keys.rotate()
 					break
 				}
@@ -96,9 +94,8 @@ func (u *VidHideUploader) UploadWithProgress(filePath string, progress ProgressF
 	return "", lastErr
 }
 
-func (u *VidHideUploader) getUploadServer(apiKey string) (string, error) {
-	url := fmt.Sprintf("%s/upload/server?key=%s", vidHideAPIBase, apiKey)
-
+func (u *DoodStreamUploader) getUploadServer(apiKey string) (string, error) {
+	url := fmt.Sprintf("%s/upload/server?key=%s", doodStreamAPIBase, apiKey)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
@@ -110,20 +107,21 @@ func (u *VidHideUploader) getUploadServer(apiKey string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return "", fmt.Errorf("status 429: rate limited")
+	}
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("get upload server failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var serverResp vidHideServerResponse
+	var serverResp doodStreamServerResponse
 	if err := json.NewDecoder(resp.Body).Decode(&serverResp); err != nil {
-		return "", fmt.Errorf("decode server response: %w", err)
+		return "", fmt.Errorf("decode: %w", err)
 	}
-
 	if serverResp.Status != 200 {
-		return "", fmt.Errorf("server status not ok: %s (result: %s)", serverResp.Msg, serverResp.Result)
+		return "", fmt.Errorf("api status %d: %s", serverResp.Status, serverResp.Msg)
 	}
-
 	if serverResp.Result == "" {
 		return "", fmt.Errorf("no upload server URL in response")
 	}
@@ -131,7 +129,7 @@ func (u *VidHideUploader) getUploadServer(apiKey string) (string, error) {
 	return serverResp.Result, nil
 }
 
-func (u *VidHideUploader) uploadFile(filePath string, progress ProgressFunc, apiKey string) (string, error) {
+func (u *DoodStreamUploader) uploadFile(filePath string, progress ProgressFunc, apiKey string) (string, error) {
 	uploadServer := u.cachedServer
 	if uploadServer == "" {
 		var err error
@@ -142,16 +140,23 @@ func (u *VidHideUploader) uploadFile(filePath string, progress ProgressFunc, api
 		u.cachedServer = uploadServer
 	}
 
+	uploadURL := uploadServer
+	if !strings.Contains(uploadURL, "?") {
+		uploadURL = uploadServer + "?" + apiKey
+	} else {
+		uploadURL = uploadServer + "&" + apiKey
+	}
+
 	body, contentLen, contentType, file, err := multipartStreamWithProgress(
-		map[string]string{"key": apiKey},
-		"file", filePath, "VidHide", progress,
+		map[string]string{"api_key": apiKey},
+		"file", filePath, "DoodStream", progress,
 	)
 	if err != nil {
 		return "", fmt.Errorf("multipart stream: %w", err)
 	}
 	defer file.Close()
 
-	req, err := http.NewRequest("POST", uploadServer, body)
+	req, err := http.NewRequest("POST", uploadURL, body)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -165,6 +170,9 @@ func (u *VidHideUploader) uploadFile(filePath string, progress ProgressFunc, api
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return "", fmt.Errorf("status 429: rate limited")
+	}
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(bodyBytes))
@@ -172,7 +180,7 @@ func (u *VidHideUploader) uploadFile(filePath string, progress ProgressFunc, api
 
 	rawBody, _ := io.ReadAll(resp.Body)
 
-	var uploadResp vidHideUploadResponse
+	var uploadResp doodStreamUploadResponse
 	if err := json.Unmarshal(rawBody, &uploadResp); err != nil {
 		return "", fmt.Errorf("decode upload response: %w (body: %s)", err, string(rawBody))
 	}
@@ -181,42 +189,24 @@ func (u *VidHideUploader) uploadFile(filePath string, progress ProgressFunc, api
 		return "", fmt.Errorf("upload failed: status %d — %s (body: %s)", uploadResp.Status, uploadResp.Msg, string(rawBody))
 	}
 
-	if len(uploadResp.Files) == 0 {
+	if len(uploadResp.Result) == 0 {
 		return "", fmt.Errorf("no files in upload response (body: %s)", string(rawBody))
 	}
 
-	fileStatus := uploadResp.Files[0].Status
-	if fileStatus != "" && !strings.EqualFold(fileStatus, "ok") {
-		errMsg := fmt.Errorf("upload rejected: file status %q (body: %s)", fileStatus, string(rawBody))
-		if strings.Contains(strings.ToLower(fileStatus), "too many") {
-			return "", &permanentError{err: errMsg}
-		}
-		return "", errMsg
-	}
-
-	fileCode := uploadResp.Files[0].FileCode
+	fileCode := uploadResp.Result[0].FileCode
 	if fileCode == "" {
 		var fallback struct {
-			Files []struct {
+			Result []struct {
 				FileCode string `json:"file_code"`
-			} `json:"files"`
+			} `json:"result"`
 		}
-		if err := json.Unmarshal(rawBody, &fallback); err == nil && len(fallback.Files) > 0 && fallback.Files[0].FileCode != "" {
-			fileCode = fallback.Files[0].FileCode
-		}
-	}
-	if fileCode == "" {
-		var fallback struct {
-			Result string `json:"result"`
-		}
-		if err := json.Unmarshal(rawBody, &fallback); err == nil && fallback.Result != "" && !strings.HasPrefix(fallback.Result, "http") {
-			fileCode = fallback.Result
+		if err := json.Unmarshal(rawBody, &fallback); err == nil && len(fallback.Result) > 0 && fallback.Result[0].FileCode != "" {
+			fileCode = fallback.Result[0].FileCode
 		}
 	}
 	if fileCode == "" {
 		return "", fmt.Errorf("no file code in response (body: %s)", string(rawBody))
 	}
 
-	viewURL := fmt.Sprintf("https://morencius.com/embed/%s", fileCode)
-	return viewURL, nil
+	return fmt.Sprintf("https://dood.to/e/%s", fileCode), nil
 }

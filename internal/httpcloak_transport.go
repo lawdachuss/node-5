@@ -25,11 +25,18 @@ import (
 // When the SOCKS5 proxy is unreachable (i/o timeout, connection refused),
 // automatically rotates to the next proxy URL in the list. This handles
 // the case where free proxy servers are intermittently available.
+//
+// On proxy rotation, fresh cookies are extracted through the new proxy via
+// Scrapling (headless browser solving Cloudflare challenges), so the
+// IP-bound cf_clearance always matches the current egress IP.
 type httpcloakTransport struct {
-	mu        sync.Mutex
-	client    *httpcloak.Client
-	proxyURLs []string
-	proxyIdx  int
+	mu               sync.Mutex
+	client           *httpcloak.Client
+	proxyURLs        []string
+	proxyIdx         int
+	currentProxy     string
+	refreshCancel    context.CancelFunc // cancels any in-flight Scrapling refresh
+	lastRefreshProxy string             // proxy URL for which we have fresh cookies
 }
 
 // sharedTransportSingleton is a singleton http.RoundTripper for the shared transport.
@@ -123,11 +130,13 @@ func applyProxyAuth(proxyURL, username, password string) string {
 
 // rotateProxy recreates the httpcloak client with the next proxy in the list.
 // Returns true if a different proxy was selected.
+// When a new proxy is selected, cookies are refreshed asynchronously via
+// Scrapling so the IP-bound cf_clearance matches the new egress IP.
 func (t *httpcloakTransport) rotateProxy() bool {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	if len(t.proxyURLs) <= 1 {
+		t.mu.Unlock()
 		return false
 	}
 
@@ -140,6 +149,26 @@ func (t *httpcloakTransport) rotateProxy() bool {
 	}
 
 	t.client = newCloakClient(proxyURL)
+	t.currentProxy = proxyURL
+
+	// Cancel any in-flight Scrapling refresh for the old proxy
+	if t.refreshCancel != nil {
+		t.refreshCancel()
+		t.refreshCancel = nil
+	}
+
+	// Debounce: skip refresh if we already have fresh cookies for this proxy
+	needsRefresh := proxyURL != "" && proxyURL != t.lastRefreshProxy
+	var refreshCtx context.Context
+	if needsRefresh {
+		refreshCtx, t.refreshCancel = context.WithCancel(context.Background())
+	}
+	t.mu.Unlock()
+
+	if needsRefresh {
+		go t.refreshCookies(refreshCtx, proxyURL, "proxy rotation")
+	}
+
 	return true
 }
 
@@ -149,9 +178,11 @@ func (t *httpcloakTransport) rotateProxy() bool {
 // This is called when all proxies in the current list have failed,
 // allowing the DVR to pick up environment variable updates without a restart
 // or dynamically discover new proxies.
+//
+// After loading new proxies, cookies are refreshed asynchronously via
+// Scrapling so the IP-bound cf_clearance matches the new egress IP.
 func (t *httpcloakTransport) refreshProxies() bool {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	// Try configured proxies first — cookies were extracted through them,
 	// so the IP/region must match or Cloudflare rejects the requests.
@@ -174,6 +205,7 @@ func (t *httpcloakTransport) refreshProxies() bool {
 			fmt.Printf("[proxy] dynamically discovered %d proxies\n", len(newProxies))
 		}
 		if len(newProxies) == 0 {
+			t.mu.Unlock()
 			if err != nil {
 				fmt.Printf("[proxy] dynamic discovery failed: %v\n", err)
 			} else {
@@ -190,8 +222,58 @@ func (t *httpcloakTransport) refreshProxies() bool {
 
 	t.proxyURLs = newProxies
 	t.proxyIdx = 0
-	t.client = newCloakClient(proxyURLAt(newProxies, 0))
+	firstProxy := proxyURLAt(newProxies, 0)
+	t.client = newCloakClient(firstProxy)
+	t.currentProxy = firstProxy
+
+	// Cancel any in-flight Scrapling refresh for the old proxy
+	if t.refreshCancel != nil {
+		t.refreshCancel()
+		t.refreshCancel = nil
+	}
+
+	// Debounce: skip refresh if we already have fresh cookies for this proxy
+	needsRefresh := firstProxy != "" && firstProxy != t.lastRefreshProxy
+	var refreshCtx context.Context
+	if needsRefresh {
+		refreshCtx, t.refreshCancel = context.WithCancel(context.Background())
+	}
+	t.mu.Unlock()
+
+	if needsRefresh {
+		go t.refreshCookies(refreshCtx, firstProxy, "proxy refresh")
+	}
+
 	return true
+}
+
+// refreshCookies runs Scrapling through the given proxy to extract fresh
+// cookies and updates server.Config so subsequent requests carry cf_clearance
+// matching the new egress IP. Runs in a background goroutine — may take
+// 30-90 seconds to solve a Cloudflare challenge.
+// Only applies the cookies if this proxy is still the current one (no
+// further rotations happened while Scrapling was running).
+func (t *httpcloakTransport) refreshCookies(ctx context.Context, proxyURL, reason string) {
+	fmt.Printf("[proxy] refreshing cookies through %s (%s)...\n", maskProxyHost(proxyURL), reason)
+
+	if err := UpdateCookiesFromProxyContext(ctx, proxyURL); err != nil {
+		if ctx.Err() != nil {
+			fmt.Printf("[proxy] cookie refresh cancelled for %s (%s)\n", maskProxyHost(proxyURL), reason)
+		} else {
+			fmt.Printf("[proxy] cookie refresh failed for %s: %v — requests may get 403 until manual cookie update\n",
+				maskProxyHost(proxyURL), err)
+		}
+		return
+	}
+
+	// Only record this proxy as refreshed if it is still the current one.
+	t.mu.Lock()
+	if t.currentProxy == proxyURL {
+		t.lastRefreshProxy = proxyURL
+	}
+	t.mu.Unlock()
+
+	fmt.Printf("[proxy] cookies refreshed successfully through %s (%s)\n", maskProxyHost(proxyURL), reason)
 }
 
 // WarmupChaturbate makes an initial request to chaturbate.com to establish

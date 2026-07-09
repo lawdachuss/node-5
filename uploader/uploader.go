@@ -274,6 +274,8 @@ type MultiHostUploader struct {
 	seekstreaming *SeekStreamingUploader
 	vidhide       *VidHideUploader
 	streamwish    *StreamWishUploader
+	doodstream    *DoodStreamUploader
+	upnshare      *UPnShareUploader
 	log           Logger
 	hostInitOnce  sync.Once
 	hosts         map[string]uploaderFunc // host name -> upload function, lazy-init
@@ -307,13 +309,19 @@ func (m *MultiHostUploader) initHosts() {
 		if m.streamwish != nil && m.streamwish.keys.count() > 0 {
 			m.hosts["StreamWish"] = m.streamwish.UploadWithProgress
 		}
+		if m.upnshare != nil && m.upnshare.keys.count() > 0 {
+			m.hosts["UPnShare"] = m.upnshare.UploadWithProgress
+		}
+		if m.doodstream != nil && m.doodstream.keys.count() > 0 {
+			m.hosts["DoodStream"] = m.doodstream.UploadWithProgress
+		}
 	})
 }
 
 // NewMultiHostUploader creates a new multi-host uploader.
 // vidHideAPIKeys and streamWishAPIKeys support comma-separated multiple keys
 // for automatic key rotation on daily quota limits.
-func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken, seekStreamingKey string, vidHideAPIKeys, streamWishAPIKeys []string, log Logger) *MultiHostUploader {
+func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEmail, mixdropToken, seekStreamingKey string, vidHideAPIKeys, streamWishAPIKeys, doodStreamAPIKeys []string, log Logger, upnshareKeys []string) *MultiHostUploader {
 	if log == nil {
 		log = &nilLogger{}
 	}
@@ -325,6 +333,8 @@ func NewMultiHostUploader(voeSXAPIKey, streamtapeLogin, streamtapeKey, mixdropEm
 		seekstreaming: NewSeekStreamingUploader(seekStreamingKey),
 		vidhide:       NewVidHideUploader(vidHideAPIKeys),
 		streamwish:    NewStreamWishUploader(streamWishAPIKeys),
+		doodstream:    NewDoodStreamUploader(doodStreamAPIKeys),
+		upnshare:      NewUPnShareUploader(upnshareKeys),
 		log:           log,
 	}
 }
