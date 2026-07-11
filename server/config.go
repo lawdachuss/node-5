@@ -129,6 +129,8 @@ func LoadSettings() error {
 		Config.StripchatPDKey = s.StripchatPDKey
 	}
 
+	fmt.Printf("[startup] after LoadSettings: doodstream keys=%q upnshare keys=%q\n", Config.DoodStreamAPIKeys, Config.UpnshareKeys)
+
 	// Parse Config.Cookies back into individual fields if they are empty.
 	if Config.Cookies != "" {
 		if Config.CfClearance == "" {
