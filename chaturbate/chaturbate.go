@@ -203,11 +203,11 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 			roomInfo.Tags = resp.Tags
 			roomInfo.NumUsers = resp.NumUsers
 			if resp.BroadcasterGender != "" {
-				roomInfo.BroadcasterGender = resp.BroadcasterGender
+			roomInfo.BroadcasterGender = resp.BroadcasterGender
 			}
 		}
 
-		switch resp.RoomStatus {
+	switch resp.RoomStatus {
 		case StatusPrivate:
 			return nil, resp.RoomStatus, internal.ErrPrivateStream
 		case StatusAway, StatusOffline:
@@ -231,6 +231,8 @@ func fetchStream(ctx context.Context, client *internal.Req, username string, roo
 	}
 
 postSucceeded:
+	var getResp *APIResponse
+	var getErr error
 
 	// Parse POST API response
 	var resp APIResponse
@@ -253,7 +255,7 @@ postSucceeded:
 	// Enrich metadata from the GET API (chatvideocontext) which reliably
 	// returns tags, room_title, num_users, and broadcaster_gender even when
 	// the POST endpoint only returns the HLS URL.
-	if getResp, getErr := fetchAPIResponse(ctx, client, username); getErr == nil {
+	if getResp, getErr = fetchAPIResponse(ctx, client, username); getErr == nil {
 		if roomInfo != nil {
 			if getResp.RoomTitle != "" {
 				roomInfo.RoomTitle = getResp.RoomTitle
@@ -270,6 +272,21 @@ postSucceeded:
 		}
 		if resp.RoomStatus == "" && getResp.RoomStatus != "" {
 			resp.RoomStatus = getResp.RoomStatus
+		}
+	}
+
+	// The POST endpoint (get_edge_hls_url_ajax) sometimes returns a false
+	// "offline"/"away" when the proxy serves a stale response or the CSRF
+	// token/cookies are momentarily flagged. The GET chatvideocontext endpoint
+	// is more lenient (cookies only, no CSRF) and reports the true room status.
+	// When POST says offline/away but GET says the channel is actually
+	// broadcasting, trust GET so we don't skip a live channel.
+	if (resp.RoomStatus == StatusAway || resp.RoomStatus == StatusOffline) && getErr == nil &&
+		getResp.RoomStatus != "" && getResp.RoomStatus != StatusAway && getResp.RoomStatus != StatusOffline {
+		resp.RoomStatus = getResp.RoomStatus
+		if resp.StreamURL() == "" && getResp.StreamURL() != "" {
+			resp.HLSSource = getResp.HLSSource
+			resp.URL = getResp.URL
 		}
 	}
 
