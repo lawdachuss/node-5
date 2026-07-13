@@ -187,7 +187,9 @@ func (ch *Channel) uploadFile(filePath string, thumbURL, spriteURL, previewURL s
 			break
 		}
 
-		// Exclude hosts with permanent or proxy errors from retries
+		// Exclude hosts with permanent or proxy errors from retries.
+		// Transient network drops (IsTransientNetworkError) are retried — a
+		// fresh connection usually succeeds after a blip.
 		skipHosts := completedHosts
 		for _, r := range results {
 			if uploader.IsPermanentError(r.Error) || uploader.IsProxyError(r.Error) {

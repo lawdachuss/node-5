@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/teacat/chaturbate-dvr/channel"
 	"github.com/teacat/chaturbate-dvr/config"
+	"github.com/teacat/chaturbate-dvr/database"
 	"github.com/teacat/chaturbate-dvr/coordinator"
 	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/internal"
@@ -418,6 +419,26 @@ func start(c *cli.Context) error {
 		fmt.Println("   IMPORTANT: Use Chrome 146+ on Windows for cookie collection so the TLS")
 		fmt.Println("   fingerprint matches the httpcloak preset.")
 		fmt.Println()
+	}
+
+	// Persist every log line to Supabase channel_logs (with parsed level +
+	// username + node ID) so errors are queryable across all nodes and survive
+	// restarts. Best-effort and non-blocking: the buffer drops lines on DB
+	// backpressure and never blocks the logging hot path.
+	if server.GetDBClient() != nil {
+		nodeID := server.NodeID()
+		server.SetLogSink(func(level, username, message string) {
+			client := server.GetDBClient()
+			if client == nil {
+				return
+			}
+			_ = client.SaveLogRobust(&database.ChannelLog{
+				NodeID:   nodeID,
+				Username: username,
+				LogLevel: level,
+				Message:  message,
+			})
+		})
 	}
 
 	// Warm up TLS sessions with Cloudflare in the background so server

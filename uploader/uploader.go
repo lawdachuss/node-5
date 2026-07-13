@@ -453,9 +453,16 @@ func IsPermanentError(err error) bool {
 	return errors.As(err, &pe)
 }
 
-// IsProxyError returns true if the error indicates a proxy connectivity issue
-// (connection refused, SOCKS failure, closed network). Outer retry loops should
-// skip retrying hosts that fail with proxy errors since the proxy is likely down.
+// IsProxyError returns true if the error indicates a genuine proxy connectivity
+// issue (connection refused to the proxy, SOCKS failure). Outer retry loops
+// should skip retrying hosts that fail with these errors because the proxy itself
+// is down — retrying the same host through the same dead proxy is futile.
+//
+// NOTE: a plain "use of closed network connection" / "forcibly closed" is NOT a
+// proxy error. It is a generic transient TCP drop that can happen even on direct
+// connections (StreamWish/VidHide use newDirectClient with no proxy). Treating it
+// as a proxy error caused hosts to be permanently skipped on the first blip, even
+// though a fresh attempt would normally succeed. See IsTransientNetworkError.
 func IsProxyError(err error) bool {
 	if err == nil {
 		return false
@@ -464,8 +471,25 @@ func IsProxyError(err error) bool {
 	return strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "actively refused") ||
 		strings.Contains(errStr, "SOCKS") ||
-		strings.Contains(errStr, "socks") ||
-		strings.Contains(errStr, "use of closed network connection") ||
+		strings.Contains(errStr, "socks")
+}
+
+// IsTransientNetworkError returns true if the error is a transient network drop
+// that should be RETRIED rather than skipped. These happen on both proxied and
+// direct connections (e.g. an idle keep-alive connection the server closed, a
+// mid-upload reset) and almost always clear on a fresh attempt.
+func IsTransientNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	if errStr == "EOF" || strings.HasSuffix(errStr, ": EOF") {
+		return true
+	}
+	return strings.Contains(errStr, "use of closed network connection") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "forcibly closed") ||
+		strings.Contains(errStr, "i/o timeout") ||
 		(strings.Contains(errStr, "wsasend") &&
 			strings.Contains(errStr, "forcibly closed"))
 }

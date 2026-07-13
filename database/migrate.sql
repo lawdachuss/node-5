@@ -163,6 +163,7 @@ CREATE INDEX IF NOT EXISTS idx_tunnels_instance ON tunnels(instance_id);
 CREATE TABLE IF NOT EXISTS channel_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     channel_id UUID REFERENCES channels(id) ON DELETE CASCADE,
+    node_id TEXT,
     username VARCHAR(255) NOT NULL,
     log_level VARCHAR(20) NOT NULL,
     message TEXT NOT NULL,
@@ -172,6 +173,11 @@ CREATE TABLE IF NOT EXISTS channel_logs (
 CREATE INDEX IF NOT EXISTS idx_channel_logs_channel_id ON channel_logs(channel_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_channel_logs_username ON channel_logs(username, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_channel_logs_created_at ON channel_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_logs_node_id ON channel_logs(node_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_logs_level ON channel_logs(log_level, created_at DESC);
+
+-- Add node_id to existing deployments without recreating the table.
+ALTER TABLE channel_logs ADD COLUMN IF NOT EXISTS node_id TEXT;
 
 -- ============================================================================
 -- 7. PREVIEW_IMAGES

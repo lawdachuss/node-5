@@ -1663,12 +1663,14 @@ func GetLogs(c *gin.Context) {
 	entries := server.GetLogBuffer().Lines(n)
 	type logLine struct {
 		Time    string `json:"time"`
+		Level   string `json:"level,omitempty"`
 		Message string `json:"message"`
 	}
 	result := make([]logLine, len(entries))
 	for i, e := range entries {
 		result[i] = logLine{
 			Time:    e.Time.Format(time.RFC3339),
+			Level:   e.Level,
 			Message: e.Message,
 		}
 	}
