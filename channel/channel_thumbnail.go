@@ -130,14 +130,14 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 	defer probeCancel()
 
 	var dur float64
-	config.AcquireFFmpeg()
+	release := config.AcquireFFmpeg()
 	probeOut, probeErr := config.FFprobeCommandContext(probeCtx,
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		videoPath,
 	).Output()
-	config.ReleaseFFmpeg() // release immediately — the 3 goroutines below also need slots
+	release() // release immediately — the 3 goroutines below also need slots
 	if probeErr == nil {
 		var parseErr error
 		dur, parseErr = strconv.ParseFloat(strings.TrimSpace(string(probeOut)), 64)
@@ -193,8 +193,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			seekPos = fmt.Sprintf("%.2f", dur*0.1)
 		}
 
-		config.AcquireFFmpeg()
-		defer config.ReleaseFFmpeg()
+		defer config.AcquireFFmpeg()()
 		stderr, err := runFFmpeg(thumbCtx,
 			"-y",
 			"-ss", seekPos,
@@ -277,8 +276,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		// seeking (-ss before -i) instead of decoding the whole file.  For a
 		// 1-hour recording this turns a full-file decode into spriteFrames
 		// instant seeks, dropping generation from minutes to seconds.
-		config.AcquireFFmpeg()
-		defer config.ReleaseFFmpeg()
+		defer config.AcquireFFmpeg()()
 
 		var stderr string
 		var err error
@@ -550,9 +548,9 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 			return true
 		}
 
-		config.AcquireFFmpeg()
+		release := config.AcquireFFmpeg()
 		previewOK := generatePreview(previewCtx)
-		config.ReleaseFFmpeg()
+		release()
 		if !previewOK {
 			previewDone <- ""
 			return
@@ -568,11 +566,11 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		for attempt := 0; attempt < maxPreviewAttempts; attempt++ {
 			if attempt > 0 {
 				info("preview: regenerating %s (attempt %d/%d)", baseName, attempt+1, maxPreviewAttempts)
-				config.AcquireFFmpeg()
+				release := config.AcquireFFmpeg()
 				regenCtx, regenCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				ok := generatePreview(regenCtx)
 				regenCancel()
-				config.ReleaseFFmpeg()
+				release()
 				if !ok {
 					uploadErr = fmt.Errorf("preview regeneration failed")
 					break
@@ -648,8 +646,7 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 func probeFirstPTSOffset(videoPath string) float64 {
 	probeCtx, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer probeCancel()
-	config.AcquireFFmpeg()
-	defer config.ReleaseFFmpeg()
+	defer config.AcquireFFmpeg()()
 	out, err := config.FFprobeCommandContext(probeCtx,
 		"-v", "error",
 		"-select_streams", "v:0",

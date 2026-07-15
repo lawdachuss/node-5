@@ -1049,8 +1049,7 @@ func removeFileWithRetry(path string) error {
 func muxVideoAudio(videoPath, audioPath, outputPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	config.AcquireFFmpeg()
-	defer config.ReleaseFFmpeg()
+	defer config.AcquireFFmpeg()()
 	cmd := config.FFmpegCommandContext(ctx, "-y",
 		"-i", videoPath,
 		"-i", audioPath,
@@ -1227,8 +1226,7 @@ func alignAVStart(path string, warn func(string)) (string, error) {
 	tmpPath := path + ".aligned.mp4"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	config.AcquireFFmpeg()
-	defer config.ReleaseFFmpeg()
+	defer config.AcquireFFmpeg()()
 	shift := -offset
 	err = config.FFmpegCommandContext(ctx,
 		"-y",
@@ -1722,8 +1720,7 @@ func deletePendingSegments(username string) {
 func VideoDurationSeconds(videoPath string) (float64, error) {
 	probeCtx, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer probeCancel()
-	config.AcquireFFmpeg()
-	defer config.ReleaseFFmpeg()
+	defer config.AcquireFFmpeg()()
 	out, err := config.FFprobeCommandContext(probeCtx,
 		"-v", "error",
 		"-show_entries", "format=duration",
@@ -1828,8 +1825,7 @@ func mergeVideos(inputs []string, outputPath string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	config.AcquireFFmpegHeavy()
-	defer config.ReleaseFFmpegHeavy()
+	defer config.AcquireFFmpegHeavy()()
 
 	// ── Phase 1: Fast stream-copy concat ────────────────────────────────
 	streamCopyOK := config.FFmpegCommandContext(ctx,

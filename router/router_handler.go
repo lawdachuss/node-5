@@ -1263,8 +1263,7 @@ func ServeLiveThumb(c *gin.Context) {
 			func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				config.AcquireFFmpeg()
-				defer config.ReleaseFFmpeg()
+				defer config.AcquireFFmpeg()()
 			args := []string{"-y"}
 			switch attempt {
 			case 0:

@@ -42,7 +42,7 @@ func (c *Coordinator) StartClaimLoop(ctx context.Context) {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				c.runClaimCycle()
+				c.runSafe("claim", c.runClaimCycle)
 			}
 		}
 	}()

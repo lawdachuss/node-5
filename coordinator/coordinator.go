@@ -116,6 +116,19 @@ func (c *Coordinator) isActive() bool {
 	return !c.draining && !c.fenced
 }
 
+// runSafe executes a background cycle function, recovering from any panic so a
+// single bad cycle can never crash the whole node (which would drop every
+// recording and stop the reaper/reconciler). The error is logged and the loop
+// simply retries on the next tick.
+func (c *Coordinator) runSafe(name string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[coordinator] %s cycle panicked (recovered): %v", name, r)
+		}
+	}()
+	fn()
+}
+
 // Stop gracefully shuts down all coordinator loops and deregisters the node.
 // Safe to call multiple times — the second call is a no-op.
 func (c *Coordinator) Stop() {

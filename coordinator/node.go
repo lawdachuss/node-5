@@ -37,38 +37,45 @@ func (c *Coordinator) StartHeartbeatLoop(ctx context.Context) {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				// Skip while gracefully shutting down: Stop() has already set
-				// status=offline, and we must not let EnsureNodeOnline flip it
-				// back to online. (This is the in-memory draining flag, NOT the
-				// fence flag — a fenced node still heartbeats to detect recovery.)
-				c.mu.Lock()
-				draining := c.draining
-				c.mu.Unlock()
-				if draining {
-					continue
-				}
-
-				load := c.currentLoad()
-				if err := c.Client.HeartbeatNode(c.NodeID, load); err != nil {
-					failures++
-					log.Printf("[coordinator] heartbeat failed (%d/%d): %v", failures, maxHeartbeatFailures, err)
-					if failures >= maxHeartbeatFailures && c.isActive() {
-						c.fence()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[coordinator] heartbeat cycle panicked (recovered): %v", r)
+						}
+					}()
+					// Skip while gracefully shutting down: Stop() has already set
+					// status=offline, and we must not let EnsureNodeOnline flip it
+					// back to online. (This is the in-memory draining flag, NOT the
+					// fence flag — a fenced node still heartbeats to detect recovery.)
+					c.mu.Lock()
+					draining := c.draining
+					c.mu.Unlock()
+					if draining {
+						return
 					}
-					continue
-				}
 
-				failures = 0
-				if c.isFenced() {
-					c.unfence()
-				} else {
-					// Recover from a "stuck offline" state (e.g. reaper marked
-					// us offline during a restart gap). Only patches when status
-					// is not already online/draining, so it never fights draining.
-					if err := c.Client.EnsureNodeOnline(c.NodeID); err != nil {
-						log.Printf("[coordinator] ensure-online error: %v", err)
+					load := c.currentLoad()
+					if err := c.Client.HeartbeatNode(c.NodeID, load); err != nil {
+						failures++
+						log.Printf("[coordinator] heartbeat failed (%d/%d): %v", failures, maxHeartbeatFailures, err)
+						if failures >= maxHeartbeatFailures && c.isActive() {
+							c.fence()
+						}
+						return
 					}
-				}
+
+					failures = 0
+					if c.isFenced() {
+						c.unfence()
+					} else {
+						// Recover from a "stuck offline" state (e.g. reaper marked
+						// us offline during a restart gap). Only patches when status
+						// is not already online/draining, so it never fights draining.
+						if err := c.Client.EnsureNodeOnline(c.NodeID); err != nil {
+							log.Printf("[coordinator] ensure-online error: %v", err)
+						}
+					}
+				}()
 			}
 		}
 	}()

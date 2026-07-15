@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/entity"
@@ -193,52 +192,45 @@ func FFprobeCommandContext(ctx context.Context, args ...string) *exec.Cmd {
 // slot. The old code blocked forever on the channel send, so a saturated
 // semaphore (e.g. a burst of concurrent preview generations) would hang the
 // entire thumbnail/preview pipeline indefinitely — the "shows a little preview
-// then got stuck" symptom. We now time out, over-subscribe deliberately, and
-// pair the release via ffmpegOverflow so ReleaseFFmpeg never deadlocks.
+// then got stuck" symptom. AcquireFFmpeg now returns a release function and, on
+// timeout, returns a no-op release (it never actually took a slot), so acquire
+// and release stay perfectly paired — no hang, no leak, no underflow.
 const ffmpegAcquireTimeout = 2 * time.Minute
 
-// ffmpegOverflow counts callers that timed out waiting for a slot and therefore
-// never actually took one. ReleaseFFmpeg decrements this instead of pulling from
-// the channel, keeping acquire/release balanced without a per-goroutine token.
-var ffmpegOverflow int64
-
-// AcquireFFmpeg waits (bounded) for a lightweight ffmpeg slot.
-func AcquireFFmpeg() {
+// AcquireFFmpeg waits (bounded) for a lightweight ffmpeg slot and returns a
+// release function that MUST be called (typically via defer) to free it.
+// If the slot cannot be obtained within ffmpegAcquireTimeout the call proceeds
+// anyway (over-subscribed) and the returned release function is a no-op, so
+// pairing is always correct.
+func AcquireFFmpeg() func() {
 	select {
 	case ffmpegSem <- struct{}{}:
+		return func() { <-ffmpegSem }
 	case <-time.After(ffmpegAcquireTimeout):
-		atomic.AddInt64(&ffmpegOverflow, 1)
 		log.Printf("WARN [config] ffmpeg semaphore saturated for %s; proceeding without a slot (oversubscribed)", ffmpegAcquireTimeout)
+		return func() {}
 	}
 }
 
-// ReleaseFFmpeg releases a lightweight ffmpeg slot.
-func ReleaseFFmpeg() {
-	if atomic.LoadInt64(&ffmpegOverflow) > 0 {
-		atomic.AddInt64(&ffmpegOverflow, -1)
-		return
-	}
-	<-ffmpegSem
-}
+// ReleaseFFmpeg is retained for any caller that captured the old signature via
+// direct channel access; new code should use the closure returned by
+// AcquireFFmpeg. It releases one lightweight ffmpeg slot.
+func ReleaseFFmpeg() { <-ffmpegSem }
 
-// AcquireFFmpegHeavy waits (bounded) for a CPU-bound compression slot.
-func AcquireFFmpegHeavy() {
+// AcquireFFmpegHeavy waits (bounded) for a CPU-bound compression slot and
+// returns a release function (see AcquireFFmpeg for the timeout/no-op contract).
+func AcquireFFmpegHeavy() func() {
 	select {
 	case ffmpegHeavySem <- struct{}{}:
+		return func() { <-ffmpegHeavySem }
 	case <-time.After(ffmpegAcquireTimeout):
-		atomic.AddInt64(&ffmpegOverflow, 1)
 		log.Printf("WARN [config] ffmpeg-heavy semaphore saturated for %s; proceeding without a slot (oversubscribed)", ffmpegAcquireTimeout)
+		return func() {}
 	}
 }
 
-// ReleaseFFmpegHeavy releases a CPU-bound compression slot.
-func ReleaseFFmpegHeavy() {
-	if atomic.LoadInt64(&ffmpegOverflow) > 0 {
-		atomic.AddInt64(&ffmpegOverflow, -1)
-		return
-	}
-	<-ffmpegHeavySem
-}
+// ReleaseFFmpegHeavy releases one CPU-bound compression slot (see ReleaseFFmpeg).
+func ReleaseFFmpegHeavy() { <-ffmpegHeavySem }
 
 func New(c *cli.Context) (*entity.Config, error) {
 	compress := c.Bool("compress")

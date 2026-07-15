@@ -58,7 +58,7 @@ func (c *Coordinator) StartOfflineShuffleLoop(ctx context.Context) {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				c.runOfflineShuffleCycle()
+				c.runSafe("offline-shuffle", c.runOfflineShuffleCycle)
 			}
 		}
 	}()
@@ -145,12 +145,23 @@ func (c *Coordinator) runOfflineShuffleCycle() {
 		log.Printf("[coordinator] offline shuffle: get assignments error: %v", err)
 		return
 	}
+	// Never move a channel that is currently running on this node. A channel
+	// that just went live is being recorded by a local worker even if its
+	// coordinator status hasn't been updated to 'recording' yet (up to the
+	// 120s live-check window) — moving it would cause a recording gap/handoff.
+	localSet := make(map[string]bool)
+	for _, u := range c.Manager.GetLocalChannels() {
+		localSet[u] = true
+	}
 	var offline []database.ChannelAssignment
 	for _, ca := range myChannels {
 		if ca.IsLive {
 			continue
 		}
 		if ca.Status == "recording" {
+			continue
+		}
+		if localSet[ca.Username] {
 			continue
 		}
 		offline = append(offline, ca)
@@ -238,7 +249,7 @@ func (c *Coordinator) StartDeadlineMigrationLoop(ctx context.Context) {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				c.runDeadlineMigrationCycle()
+				c.runSafe("deadline-migration", c.runDeadlineMigrationCycle)
 			}
 		}
 	}()
@@ -349,7 +360,7 @@ func (c *Coordinator) StartReconcileLoop(ctx context.Context) {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				c.runReconcileCycle()
+				c.runSafe("reconcile", c.runReconcileCycle)
 			}
 		}
 	}()

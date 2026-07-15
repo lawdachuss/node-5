@@ -51,8 +51,7 @@ var availableEncoders = []videoEncoder{
 
 // detectEncoder finds the best available encoder
 func detectEncoder() (videoEncoder, string) {
-	config.AcquireFFmpegHeavy()
-	defer config.ReleaseFFmpegHeavy()
+	defer config.AcquireFFmpegHeavy()()
 	for _, enc := range availableEncoders {
 		// Test if encoder is available by running ffmpeg with it
 		cmd := config.FFmpegCommand("-hide_banner", "-f", "lavfi", "-i", "nullsrc=s=256x256:d=1", "-c:v", enc.codec, "-f", "null", "-")
@@ -112,8 +111,7 @@ func (ch *Channel) CompressFile(srcPath string) {
 		args = append(args, encoder.args...)
 		args = append(args, "-c:a", "aac", "-b:a", "128k", mkvPath)
 
-		config.AcquireFFmpegHeavy()
-		defer config.ReleaseFFmpegHeavy()
+		defer config.AcquireFFmpegHeavy()()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		cmd := config.FFmpegCommandContext(ctx, args...)
@@ -188,8 +186,7 @@ func (ch *Channel) MuxAV(videoPath, audioPath, outputPath string) error {
 		outputPath,
 	}
 
-	config.AcquireFFmpeg()
-	defer config.ReleaseFFmpeg()
+	defer config.AcquireFFmpeg()()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := config.FFmpegCommandContext(ctx, args...)

@@ -30,7 +30,7 @@ func (c *Coordinator) StartReaperLoop(ctx context.Context) {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				c.runReapCycle(heartbeatTimeout)
+				c.runSafe("reaper", func() { c.runReapCycle(heartbeatTimeout) })
 			}
 		}
 	}()

@@ -32,7 +32,7 @@ func (c *Coordinator) StartLiveCheckLoop(ctx context.Context) {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				c.runLiveCheck()
+				c.runSafe("live-check", c.runLiveCheck)
 			}
 		}
 	}()
