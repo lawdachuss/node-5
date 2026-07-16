@@ -624,7 +624,6 @@ func start(c *cli.Context) error {
 
 		server.Manager.StopSession()
 		server.Manager.StopAllChannels()
-		server.Manager.StopWatcher()
 		fmt.Println("[SHUTDOWN] all channels stopped - waiting for mux/thumbnail/upload/Supabase to finish...")
 
 		shutdownDone := make(chan struct{})

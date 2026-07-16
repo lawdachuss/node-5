@@ -35,9 +35,7 @@ type IManager interface {
 	WaitForUploads()
 	StopAllChannels()
 	WaitForAllChannels()
-	StopWatcher()
 	StartSession(duration time.Duration)
-	StartWatcher()
 	IsFileUploadInFlight(filePath string) bool
 	SessionInfo() (time.Duration, bool)
 	TriggerSessionStop()

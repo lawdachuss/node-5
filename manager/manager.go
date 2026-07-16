@@ -20,7 +20,6 @@ import (
 	"github.com/teacat/chaturbate-dvr/entity"
 	"github.com/teacat/chaturbate-dvr/router/view"
 	"github.com/teacat/chaturbate-dvr/server"
-	"github.com/teacat/chaturbate-dvr/watcher"
 )
 
 // renderCacheEntry holds the last-rendered HTML and a fingerprint of the
@@ -64,10 +63,6 @@ type Manager struct {
 	// Coordinator for distributed shards/nodes mode (nil in isolated mode).
 	Coordinator *coordinator.Coordinator
 
-	// watcherDone is closed during graceful shutdown so the fsnotify
-	// watcher can release its file handles promptly.
-	WatcherDone chan struct{}
-
 	// saveDebounce coalesces rapid SaveConfig calls into a single
 	// Supabase PATCH.  The first call starts a 1 s timer; subsequent
 	// calls reset it.  When the timer fires, the actual save runs.
@@ -89,11 +84,6 @@ type Manager struct {
 	// and browser DOM replacements for offline/paused channels.
 	renderCache   map[string]*renderCacheEntry
 	renderCacheMu sync.Mutex
-
-	// watcherMu guards WatcherDone close + reset so the session loop
-	// and the SIGTERM handler cannot panic on double-close.
-	watcherMu     sync.Mutex
-	watcherClosed bool
 
 	// sessionDeadline tracks when the current recording session will end
 	// (zero = no active session, recording or between cycles).
@@ -165,7 +155,6 @@ func New() (*Manager, error) {
 		SSE:          server,
 		logRateLimit: make(map[string]time.Time),
 		renderCache:  make(map[string]*renderCacheEntry),
-		WatcherDone:  make(chan struct{}),
 	}, nil
 }
 
@@ -267,28 +256,6 @@ func (m *Manager) LoadConfig() error {
 		}()
 	}
 
-	// File watcher for real-time orphan detection.
-	// Only watch the output directory — files in the temp "videos/"
-	// directory are either active recordings (which the watcher must
-	// not touch) or are already handled by MoveToOutputDir's upload
-	// goroutine after a failed move.
-	go func() {
-		dirs := []string{}
-		if server.Config.OutputDir != "" {
-			dirs = append(dirs, server.Config.OutputDir)
-		}
-		if len(dirs) == 0 {
-			return
-		}
-		fw, err := watcher.New(dirs)
-		if err != nil {
-			log.Printf("[watcher] failed to start: %v", err)
-			return
-		}
-		log.Printf("[watcher] watching %d directories for new video files", len(dirs))
-		fw.Start(m.WatcherDone)
-	}()
-
 	return nil
 }
 
@@ -359,19 +326,6 @@ func (m *Manager) LoadPooledConfig() error {
 			for range ticker.C {
 				m.ScanThumbnails()
 			}
-		}()
-	}
-
-	// File watcher
-	if server.Config.OutputDir != "" {
-		go func() {
-			dirs := []string{server.Config.OutputDir}
-			fw, err := watcher.New(dirs)
-			if err != nil {
-				log.Printf("[watcher] failed to start: %v", err)
-				return
-			}
-			fw.Start(m.WatcherDone)
 		}()
 	}
 
@@ -609,19 +563,6 @@ func (m *Manager) StopChannel(username string) error {
 	return nil
 }
 
-// StopWatcher signals the fsnotify file watcher to shut down, releasing
-// its file handles.  Call during graceful shutdown after all channels have
-// been stopped so the watcher cannot race with deferred Cleanup goroutines.
-// Safe to call multiple times — the close is guarded by watcherMu.
-func (m *Manager) StopWatcher() {
-	m.watcherMu.Lock()
-	defer m.watcherMu.Unlock()
-	if !m.watcherClosed {
-		close(m.WatcherDone)
-		m.watcherClosed = true
-	}
-}
-
 // WaitForUploads processes queued recordings and blocks until their uploads
 // and metadata saves have finished. Call this during graceful shutdown so
 // recordings are not lost when the container receives SIGTERM.
@@ -691,34 +632,6 @@ func (m *Manager) ResumeAllChannels() {
 	})
 }
 
-// StartWatcher creates a new fsnotify watcher on the output directory
-// and runs it in a background goroutine.  Used by the session loop to
-// re-enable orphan detection after the processing phase completes.
-func (m *Manager) StartWatcher() {
-	dirs := []string{}
-	if server.Config != nil && server.Config.OutputDir != "" {
-		dirs = append(dirs, server.Config.OutputDir)
-	}
-	if len(dirs) == 0 {
-		return
-	}
-
-	m.watcherMu.Lock()
-	m.WatcherDone = make(chan struct{})
-	m.watcherClosed = false
-	m.watcherMu.Unlock()
-
-	go func() {
-		fw, err := watcher.New(dirs)
-		if err != nil {
-			log.Printf("[watcher] failed to start: %v", err)
-			return
-		}
-		log.Printf("[watcher] watching %d directories for new video files", len(dirs))
-		fw.Start(m.WatcherDone)
-	}()
-}
-
 // StopWithProcessingQueue cancels all channels and processes their queued
 // recordings in batches using a limited number of workers.  Each worker
 // processes one channel at a time (mux all pending files, wait for all
@@ -731,7 +644,6 @@ func (m *Manager) StopWithProcessingQueue(workers int) {
 	})
 
 	m.CancelAllChannels()
-	m.StopWatcher()
 
 	log.Printf("[session] waiting for %d channels to close recordings...", len(chs))
 	m.WaitForAllChannels()
@@ -895,7 +807,6 @@ sessionWait:
 
 	log.Println("[session] restarting recording session")
 	m.ResumeAllChannels()
-	m.StartWatcher()
 	m.sessionLoop(d)
 }
 
