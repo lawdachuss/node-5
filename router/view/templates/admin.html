@@ -460,11 +460,6 @@
             <div class="sub">{{ subFailed .Uploads.History }} failed</div>
         </div>
         <div class="metric-card">
-            <div class="label">Orphan Files</div>
-            <div class="value">{{ len .Orphans }}</div>
-            <div class="sub">{{ orphSize .Orphans }} total</div>
-        </div>
-        <div class="metric-card">
             <div class="label">Disk</div>
             <div class="value">{{ .Disk.Used }}</div>
             <div class="sub">{{ .Disk.Free }} free of {{ .Disk.Total }}</div>
@@ -957,47 +952,6 @@
         </div>
     </details>
 
-    <!-- ════════ ORPHAN FILES ════════ -->
-    <details class="section">
-        <summary><span class="arrow">▶</span> Orphan Files <span class="count">{{ len .Orphans }}</span></summary>
-        <div class="section-body">
-            <input type="text" class="filter-input" id="orphan-search" placeholder="Search orphan files..." oninput="filterOrphans()">
-            <table class="admin-table">
-                <thead>
-                    <tr>
-                        <th>Filename</th>
-                        <th>Path</th>
-                        <th>Size</th>
-                        <th>Age</th>
-                        <th>Modified</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody id="orphans-tbody">
-                    {{ if .Orphans }}
-                    {{ range .Orphans }}
-                    <tr>
-                        <td class="mono truncate" title="{{ .Filename }}">{{ .Filename }}</td>
-                        <td class="mono truncate" title="{{ .Path }}" style="max-width:200px">{{ .Path }}</td>
-                        <td class="mono">{{ printf "%.1f" (divBytes .Size) }} MB</td>
-                        <td class="mono">{{ .Age }}</td>
-                        <td class="mono">{{ .ModTime }}</td>
-                        <td>
-                            <div class="orphan-actions">
-                                <button class="btn-retry" onclick="retryOrphan('{{ .Path }}', this)">Retry</button>
-                                <button class="btn-delete" onclick="deleteOrphan('{{ .Path }}', this)">Delete</button>
-                            </div>
-                        </td>
-                    </tr>
-                    {{ end }}
-                    {{ else }}
-                    <tr><td colspan="6" class="empty-state">No orphan files found</td></tr>
-                    {{ end }}
-                </tbody>
-            </table>
-        </div>
-    </details>
-
     <!-- ════════ DISK ════════ -->
     <details class="section">
         <summary><span class="arrow">▶</span> Disk Usage</summary>
@@ -1288,57 +1242,6 @@ function channelAction(action, username) {
     });
 }
 
-function filterOrphans() {
-    var q = document.getElementById('orphan-search').value.toLowerCase();
-    var rows = document.querySelectorAll('#orphans-tbody tr');
-    rows.forEach(function(tr) {
-        var text = (tr.textContent || '').toLowerCase();
-        tr.style.display = text.indexOf(q) !== -1 ? '' : 'none';
-    });
-}
-
-function retryOrphan(path, btn) {
-    btn.disabled = true;
-    btn.textContent = '...';
-    fetch('/api/orphans/retry', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({paths: [path]})
-    }).then(function(r) { return r.json(); }).then(function(data) {
-        var results = (data && data.results) || [];
-        if (results.length > 0 && results[0].status === 'success') {
-            btn.textContent = 'Done';
-            btn.style.background = 'rgba(16,185,129,0.15)';
-            btn.style.color = '#10b981';
-            setTimeout(function() { location.reload(); }, 3000);
-        } else {
-            var err = results.length > 0 ? results[0].error : 'unknown';
-            btn.textContent = err ? err.substring(0, 20) : 'Failed';
-            btn.style.background = 'rgba(239,68,68,0.15)';
-            btn.style.color = '#ef4444';
-        }
-    }).catch(function() {
-        btn.textContent = 'Error';
-        btn.style.background = 'rgba(239,68,68,0.15)';
-        btn.style.color = '#ef4444';
-    });
-}
-
-function deleteOrphan(path, btn) {
-    if (!confirm('Delete ' + path + '?')) return;
-    btn.disabled = true;
-    btn.textContent = '...';
-    fetch('/api/orphans', {
-        method: 'DELETE',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({paths: [path]})
-    }).then(function(r) { return r.json(); }).then(function() {
-        var tr = btn.closest('tr');
-        if (tr) tr.remove();
-    }).catch(function() {
-        btn.textContent = 'Error';
-    });
-}
 </script>
 </body>
 </html>

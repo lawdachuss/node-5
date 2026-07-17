@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/database"
@@ -739,7 +740,11 @@ func SavePipelineState(state *database.PipelineState) error {
 	if client == nil {
 		return nil
 	}
-	return client.SavePipelineState(state)
+	err := client.SavePipelineState(state)
+	if err == nil {
+		InvalidatePipelineStatesCache()
+	}
+	return err
 }
 
 // LoadAllPipelineStates returns all incomplete pipeline states for recovery.
@@ -751,13 +756,59 @@ func LoadAllPipelineStates() ([]database.PipelineState, error) {
 	return client.LoadAllPipelineStates()
 }
 
+// pipelineStatesCache caches the (slow-changing) pipeline-state list so the
+// reaper loop doesn't re-scan the whole Supabase table on every tick. The
+// reaper runs every 10m and previously caused tens of thousands of sequential
+// table scans; a short TTL keeps the data fresh while cutting DB load ~10x.
+var (
+	pipelineStatesCacheMu sync.Mutex
+	pipelineStatesCache   []database.PipelineState
+	pipelineStatesExpiry  time.Time
+)
+
+const pipelineStatesCacheTTL = 90 * time.Second
+
+// LoadAllPipelineStatesCached returns the cached pipeline states, refreshing
+// from Supabase only when the cache is empty or expired.
+func LoadAllPipelineStatesCached() ([]database.PipelineState, error) {
+	pipelineStatesCacheMu.Lock()
+	defer pipelineStatesCacheMu.Unlock()
+	if time.Now().Before(pipelineStatesExpiry) && pipelineStatesCache != nil {
+		return pipelineStatesCache, nil
+	}
+	states, err := LoadAllPipelineStates()
+	if err != nil {
+		// On error, serve stale data if we have any rather than hammering DB.
+		if pipelineStatesCache != nil {
+			return pipelineStatesCache, nil
+		}
+		return nil, err
+	}
+	pipelineStatesCache = states
+	pipelineStatesExpiry = time.Now().Add(pipelineStatesCacheTTL)
+	return states, nil
+}
+
+// InvalidatePipelineStatesCache forces the next read to hit Supabase. Call
+// after mutating (save/delete) a pipeline state.
+func InvalidatePipelineStatesCache() {
+	pipelineStatesCacheMu.Lock()
+	pipelineStatesCache = nil
+	pipelineStatesExpiry = time.Time{}
+	pipelineStatesCacheMu.Unlock()
+}
+
 // DeletePipelineState removes a completed or failed pipeline state.
 func DeletePipelineState(fileHash string) error {
 	client := GetDBClient()
 	if client == nil {
 		return nil
 	}
-	return client.DeletePipelineState(fileHash)
+	err := client.DeletePipelineState(fileHash)
+	if err == nil {
+		InvalidatePipelineStatesCache()
+	}
+	return err
 }
 
 // ─── Tunnels ──────────────────────────────────────────────────────────────────

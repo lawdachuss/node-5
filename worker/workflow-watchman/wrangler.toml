@@ -30,5 +30,5 @@ CB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 # Run the scan every 15 minutes, plus a separate 20-min health check that
 # alerts if the last successful scan is older than the configured threshold.
 [triggers]
-crons = ["*/15 * * * *", "*/20 * * * *"]
+crons = ["*/30 * * * *", "*/20 * * * *"]
 

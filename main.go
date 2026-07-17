@@ -497,13 +497,9 @@ func start(c *cli.Context) error {
 		fmt.Println("   probing will FAIL. Install ffmpeg/ffprobe (e.g. `winget install ffmpeg`)")
 		fmt.Println("   or set FFMPEG_PATH in .env to a valid binary path.")
 	}
-	if dbClient := server.GetDBClient(); dbClient != nil {
-		if problems := dbClient.CheckChannelLogsSchema(); len(problems) > 0 {
-			for _, p := range problems {
-				fmt.Printf("⚠️  [startup] DATABASE SCHEMA PROBLEM: %s\n", p)
-			}
-		}
-	}
+	// NOTE: the old channel_logs schema self-check (CheckChannelLogsSchema)
+	// was removed because logs no longer live in Supabase. See the log-sink
+	// note above.
 
 	// Load cookies from Supabase if available (overrides .env)
 	if server.Config.SupabaseURL != "" && server.Config.SupabaseAPIKey != "" {
@@ -532,25 +528,14 @@ func start(c *cli.Context) error {
 		fmt.Println()
 	}
 
-	// Persist every log line to Supabase channel_logs (with parsed level +
-	// username + node ID) so errors are queryable across all nodes and survive
-	// restarts. Best-effort and non-blocking: the buffer drops lines on DB
-	// backpressure and never blocks the logging hot path.
-	if server.GetDBClient() != nil {
-		nodeID := server.NodeID()
-		server.SetLogSink(func(level, username, message string) {
-			client := server.GetDBClient()
-			if client == nil {
-				return
-			}
-			_ = client.SaveLogRobust(&database.ChannelLog{
-				NodeID:   nodeID,
-				Username: username,
-				LogLevel: level,
-				Message:  message,
-			})
-		})
-	}
+	// Log persistence to Supabase channel_logs was removed: every node used to
+	// write each log line to that table, which grew to ~1.5M rows / 700MB in
+	// under 18h and blew the Supabase usage quota. Logs now stay local
+	// (stdout + in-memory buffer, surfaced via the node /api/logs endpoint) so
+	// they survive restarts without any database writes. See server/logbuffer.go.
+	//
+	// If centralized logs are needed later, ship them to Cloudflare Logpush or
+	// the Worker KV ring buffer instead of Postgres.
 
 	// Warm up TLS sessions with Cloudflare in the background so server
 	// startup is not delayed by slow/unreachable SOCKS5 proxies.

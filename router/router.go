@@ -88,11 +88,6 @@ func SetupViews(r *gin.Engine) {
 	r.GET("/api/tunnel", GetTunnel)
 	r.POST("/api/tunnel", UpdateTunnel)
 
-	// Orphan management API
-	r.GET("/api/orphans", ListOrphans)
-	r.POST("/api/orphans/retry", RetryOrphan)
-	r.DELETE("/api/orphans", DeleteOrphans)
-
 	// Thumbnail proxy API
 	r.GET("/api/thumb/:username", ServeLiveThumb)
 
@@ -140,13 +135,6 @@ func LoadHTMLFromEmbedFS(r *gin.Engine, embeddedFS embed.FS, files ...string) er
 				}
 			}
 			return n
-		},
-		"orphSize": func(orphans []orphanEntry) string {
-			var s int64
-			for _, o := range orphans {
-				s += o.Size
-			}
-			return fmt.Sprintf("%.1f MB", float64(s)/1024/1024)
 		},
 		"divBytes": func(b int64) float64 { return float64(b) / 1024 / 1024 },
 	})

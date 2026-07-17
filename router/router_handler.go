@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/teacat/chaturbate-dvr/channel"
 	"github.com/teacat/chaturbate-dvr/config"
 	"github.com/teacat/chaturbate-dvr/database"
 	"github.com/teacat/chaturbate-dvr/entity"
@@ -78,7 +77,6 @@ type AdminData struct {
 	Channels []*entity.ChannelInfo
 	Disk     *entity.DiskInfo
 	Uploads  *entity.UploadsResponse
-	Orphans  []orphanEntry
 
 	// Session
 	SessionActive    bool
@@ -115,51 +113,6 @@ func AdminPage(c *gin.Context) {
 
 	channels := server.Manager.ChannelInfo()
 	uploads := server.Manager.UploadEntries()
-
-	// ── Orphans ──
-	dirs := []string{"videos"}
-	if server.Config.OutputDir != "" {
-		dirs = append(dirs, server.Config.OutputDir)
-	}
-	uploaded := map[string]bool{}
-	allRecs, _ := server.GetDBClient().GetAllRecordings()
-	for i := range allRecs {
-		uploaded[allRecs[i].Filename] = true
-	}
-	var orphans []orphanEntry
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			ext := strings.ToLower(filepath.Ext(name))
-			if ext != ".mp4" && ext != ".mkv" {
-				continue
-			}
-			if strings.Contains(name, ".video.") || strings.Contains(name, ".audio.") || strings.Contains(name, ".muxed.") {
-				continue
-			}
-			if uploaded[name] {
-				continue
-			}
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			orphans = append(orphans, orphanEntry{
-				Path:     filepath.Join(dir, name),
-				Filename: name,
-				Size:     info.Size(),
-				ModTime:  info.ModTime().Format(time.RFC3339),
-				Age:      time.Since(info.ModTime()).Round(time.Hour).String(),
-			})
-		}
-	}
 
 	// ── Session info ──
 	var sessionActive bool
@@ -240,7 +193,6 @@ func AdminPage(c *gin.Context) {
 		Channels: channels,
 		Disk:     server.GetDiskInfo(),
 		Uploads:  uploads,
-		Orphans:  orphans,
 
 		SessionActive:    sessionActive,
 		SessionRemaining: sessionRemaining,
@@ -1065,19 +1017,6 @@ func extractFileCode(link string) string {
 	return ""
 }
 
-// ─── Orphan Management API ────────────────────────────────────────────────────
-
-type orphanEntry struct {
-	Path     string `json:"path"`
-	Filename string `json:"filename"`
-	Size     int64  `json:"size"`
-	ModTime  string `json:"modTime"`
-	Age      string `json:"age"`
-}
-
-// ListOrphans returns a JSON list of orphaned video files found in the
-// videos/ and OutputDir directories.  Orphans are files that exist on disk
-// but have no Supabase recording entry.
 // UploadQueue returns the current upload queue state (active + pending) as JSON.
 func UploadQueue(c *gin.Context) {
 	resp := server.Manager.UploadEntries()
@@ -1089,119 +1028,6 @@ func UploadQueue(c *gin.Context) {
 func TriggerSessionStop(c *gin.Context) {
 	server.Manager.TriggerSessionStop()
 	c.JSON(200, gin.H{"success": true})
-}
-
-func ListOrphans(c *gin.Context) {
-	dirs := []string{"videos"}
-	if server.Config.OutputDir != "" {
-		dirs = append(dirs, server.Config.OutputDir)
-	}
-
-	// Load all recordings once to avoid N+1 queries
-	uploaded := map[string]bool{}
-	allRecs, _ := server.GetDBClient().GetAllRecordings()
-	for i := range allRecs {
-		uploaded[allRecs[i].Filename] = true
-	}
-
-	var orphans []orphanEntry
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			ext := strings.ToLower(filepath.Ext(name))
-			if ext != ".mp4" && ext != ".mkv" {
-				continue
-			}
-			if strings.Contains(name, ".video.") || strings.Contains(name, ".audio.") || strings.Contains(name, ".muxed.") {
-				continue
-			}
-
-			if uploaded[name] {
-				continue // not orphaned — already uploaded
-			}
-
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-
-			orphans = append(orphans, orphanEntry{
-				Path:     filepath.Join(dir, name),
-				Filename: name,
-				Size:     info.Size(),
-				ModTime:  info.ModTime().Format(time.RFC3339),
-				Age:      time.Since(info.ModTime()).Round(time.Hour).String(),
-			})
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"orphans": orphans})
-}
-
-// RetryOrphan triggers thumbnail generation + upload for one or more orphan
-// files.  Expects JSON body: {"paths": ["/path/to/file.mp4", ...]}.
-func RetryOrphan(c *gin.Context) {
-	var req struct {
-		Paths []string `json:"paths"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if len(req.Paths) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no paths provided"})
-		return
-	}
-
-	type result struct {
-		Path   string `json:"path"`
-		Status string `json:"status"`
-		Error  string `json:"error,omitempty"`
-	}
-
-	results := make([]result, len(req.Paths))
-
-	// Bound concurrency so a large batch can't spawn one goroutine per file and
-	// exhaust the ffmpeg semaphore (which would make every generation block and
-	// hang this request).  Up to 4 previews run in parallel; the rest queue.
-	const maxConcurrent = 4
-	sem := make(chan struct{}, maxConcurrent)
-	var wg sync.WaitGroup
-	for i, path := range req.Paths {
-		abs, err := filepath.Abs(path)
-		if err != nil || !isPathAllowed(abs) {
-			results[i] = result{Path: path, Status: "failed", Error: "path not allowed"}
-			continue
-		}
-		wg.Add(1)
-		sem <- struct{}{} // acquire a concurrency slot (blocks if 4 already running)
-		go func(idx int, p string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					results[idx] = result{Path: p, Status: "failed", Error: fmt.Sprintf("panic: %v", r)}
-				}
-			}()
-			thumbURL, spriteURL, previewURL := channel.GenerateThumbnailForFile(p)
-			if !channel.UploadOrphanedFile(p, thumbURL, spriteURL, previewURL) {
-				results[idx] = result{Path: p, Status: "failed", Error: "upload did not complete successfully"}
-				return
-			}
-			results[idx] = result{Path: p, Status: "success"}
-		}(i, path)
-	}
-	wg.Wait()
-
-	c.JSON(http.StatusOK, gin.H{"results": results})
 }
 
 var (
@@ -1352,46 +1178,6 @@ func ServeLiveThumb(c *gin.Context) {
 	thumbCache[username] = thumbCacheEntry{data: data, contentType: ct, expiresAt: time.Now().Add(5 * time.Second)}
 	thumbCacheMu.Unlock()
 	c.Data(http.StatusOK, ct, data)
-}
-
-func DeleteOrphans(c *gin.Context) {
-	var req struct {
-		Paths []string `json:"paths"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if len(req.Paths) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no paths provided"})
-		return
-	}
-
-	deleted := 0
-	var errors []string
-	for _, path := range req.Paths {
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: bad path", path))
-			continue
-		}
-		if !isPathAllowed(abs) {
-			errors = append(errors, fmt.Sprintf("%s: path not allowed", path))
-			continue
-		}
-		if err := os.Remove(abs); err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", path, err))
-		} else {
-			deleted++
-		}
-	}
-
-	resp := gin.H{"deleted": deleted}
-	if len(errors) > 0 {
-		resp["errors"] = errors
-	}
-	c.JSON(http.StatusOK, resp)
 }
 
 // ─── Nodes Dashboard ─────────────────────────────────────────────────────────

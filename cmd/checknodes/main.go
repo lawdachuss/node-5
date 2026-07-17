@@ -200,145 +200,18 @@ func main() {
 		}
 	}
 
-	// ---- 3. Persisted channel_logs (errors across all nodes) ----
-	body, status, err = authedGet(client, "/channel_logs?select=count&order=created_at.desc")
-	if err == nil && status < 400 {
-		fmt.Printf("\n=== channel_logs total rows: %s ===\n", strings.TrimSpace(string(body)))
-	}
-	// Error-level logs across every node (the thing you actually want to watch).
-	body, status, err = authedGet(client, "/channel_logs?log_level=eq.error&order=created_at.desc&limit=200")
-	if err != nil {
-		fmt.Printf("\nERROR fetching error logs: %v\n", err)
-	} else if status >= 400 {
-		fmt.Printf("\nERROR fetching error logs: HTTP %d %s\n", status, string(body))
-	} else {
-		var logs []database.ChannelLog
-		_ = json.Unmarshal(body, &logs)
-		fmt.Printf("\n=== PERSISTED ERROR LOGS (%d) ===\n", len(logs))
-		for _, l := range logs {
-			fmt.Printf("  %s node=%-12s user=%-20s %s\n", l.CreatedAt, l.NodeID, l.Username, truncate(l.Message, 220))
-		}
-		if len(logs) == 0 {
-			fmt.Println("  (none)")
-		}
-		// Breakdown by host + error type to confirm account-level exhaustion.
-		type stat struct {
-			total   int
-			storage int
-			quota   int
-			reject  int
-		}
-		byHost := map[string]*stat{}
-		var firstT, lastT string
-		for _, l := range logs {
-			m := l.Message
-			host := "other"
-			for _, h := range []string{"VOE.sx", "StreamWish", "VidHide", "VOE"} {
-				if strings.Contains(m, h) {
-					host = h
-					break
-				}
-			}
-			if host == "VOE" {
-				host = "VOE.sx"
-			}
-			s := byHost[host]
-			if s == nil {
-				s = &stat{}
-				byHost[host] = s
-			}
-			s.total++
-			switch {
-			case strings.Contains(m, "Maximum storage space"):
-				s.storage++
-			case strings.Contains(m, "too many files"):
-				s.quota++
-			case strings.Contains(m, "upload rejected"):
-				s.reject++
-			}
-			if firstT == "" || l.CreatedAt < firstT {
-				firstT = l.CreatedAt
-			}
-			if l.CreatedAt > lastT {
-				lastT = l.CreatedAt
-			}
-		}
-		fmt.Printf("\n=== ERROR BREAKDOWN (window %s .. %s) ===\n", firstT, lastT)
-		for h, s := range byHost {
-			fmt.Printf("  %-10s total=%-4d storageFull=%-4d dailyQuota(20)=%-4d rejected=%-4d\n", h, s.total, s.storage, s.quota, s.reject)
-		}
-	}
-
-	// WARN-level logs — frequently hide slow-burn problems (proxy deaths,
-	// disk pressure, ffmpeg warnings, repeated retries) that never reach ERROR.
-	body, status, err = authedGet(client, "/channel_logs?log_level=eq.warn&order=created_at.desc&limit=40")
-	if err != nil {
-		fmt.Printf("\nERROR fetching warn logs: %v\n", err)
-	} else if status >= 400 {
-		fmt.Printf("\nERROR fetching warn logs: HTTP %d %s\n", status, string(body))
-	} else {
-		var logs []database.ChannelLog
-		_ = json.Unmarshal(body, &logs)
-		fmt.Printf("\n=== PERSISTED WARN LOGS (%d) ===\n", len(logs))
-		for _, l := range logs {
-			fmt.Printf("  %s user=%-20s %s\n", l.CreatedAt, l.Username, truncate(l.Message, 200))
-		}
-		if len(logs) == 0 {
-			fmt.Println("  (none)")
-		}
-	}
-	// Most recent raw logs (any level) for context.
-	body, status, err = authedGet(client, "/channel_logs?order=created_at.desc&limit=20")
-	if err != nil {
-		fmt.Printf("\nERROR fetching recent logs: %v\n", err)
-	} else if status >= 400 {
-		fmt.Printf("\nERROR fetching recent logs: HTTP %d %s\n", status, string(body))
-	} else {
-		var logs []database.ChannelLog
-		_ = json.Unmarshal(body, &logs)
-		fmt.Printf("\n=== RECENT PERSISTED LOGS (%d) ===\n", len(logs))
-		for _, l := range logs {
-			fmt.Printf("  %s %-7s node=%-12s user=%-18s %s\n", l.CreatedAt, l.LogLevel, l.NodeID, l.Username, truncate(l.Message, 90))
-		}
-	}
-
-	// ---- 4. A/V realignment activity (did the hardening actually fire?) ----
-	// ILIKE on message times out without an index, so fetch a recent window
-	// and filter client-side.
-	body, status, err = authedGet(client, "/channel_logs?order=created_at.desc&limit=500")
-	if err != nil {
-		fmt.Printf("\nERROR fetching recent window: %v\n", err)
-	} else if status >= 400 {
-		fmt.Printf("\nERROR fetching recent window: HTTP %d %s\n", status, string(body))
-	} else {
-		var window []database.ChannelLog
-		_ = json.Unmarshal(body, &window)
-		realign := 0
-		var samples []database.ChannelLog
-		nullNode := 0
-		for _, l := range window {
-			if strings.Contains(l.Message, "realign") || strings.Contains(l.Message, "start offset") {
-				realign++
-				if len(samples) < 12 {
-					samples = append(samples, l)
-				}
-			}
-			if l.NodeID == "" {
-				nullNode++
-			}
-		}
-		fmt.Printf("\n=== A/V REALIGNMENT LOGS (in last %d rows: %d) ===\n", len(window), realign)
-		for _, l := range samples {
-			fmt.Printf("  %s user=%-20s %s\n", l.CreatedAt, l.Username, truncate(l.Message, 110))
-		}
-		if realign == 0 {
-			fmt.Println("  (none captured — offsets may be below the 50ms threshold, or logs predate the fix)")
-		}
-		fmt.Printf("\n=== channel_logs node_id coverage (last %d rows): %d have NULL node_id ===\n", len(window), nullNode)
-		if nullNode == len(window) && len(window) > 0 {
-			fmt.Println("  (migration gap: node_id column not populated on live Supabase)")
-		}
-	}
+	// ---- 3. Persisted logs (now in Cloudflare, not Supabase) ----
+	// The autopilot worker no longer writes logs to Supabase `channel_logs`
+	// (that table grew to ~1.5M rows / 700MB and blew the usage quota). Logs
+	// now live in the Cloudflare Worker KV ring buffer (binding AUTOPILOT,
+	// key "autopilot_log") and in Workers Logs (`wrangler tail`). Fetch them
+	// with:
+	//   npx wrangler kv key get --binding=AUTOPILOT autopilot_log
+	//   npx wrangler tail
+	fmt.Println("\n=== LOGS ===")
+	fmt.Println("  Node/persisted logs moved off Supabase to Cloudflare KV + Workers Logs.")
+	fmt.Println("  View with: npx wrangler kv key get --binding=AUTOPILOT autopilot_log")
+	fmt.Println("             npx wrangler tail")
 }
 
 func truncate(s string, max int) string {

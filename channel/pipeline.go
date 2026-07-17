@@ -738,7 +738,7 @@ func (pq *PipelineQueue) reapLoop() {
 // safely (two nodes deleting the same row is a no-op).  The local muxed file is
 // left on disk; the orphan scanner re-ingests it if it is still recoverable.
 func (pq *PipelineQueue) reapStalePipelines() {
-	states, err := server.LoadAllPipelineStates()
+	states, err := server.LoadAllPipelineStatesCached()
 	if err != nil {
 		pq.ch.Warn("pipeline: reaper could not load states: %v", err)
 		return

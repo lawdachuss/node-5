@@ -51,7 +51,8 @@ const DEFAULT_CONFIG = {
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const SESSION_TTL = 1800; // 30 min — cf_clearance reuse window
+const SESSION_TTL = 2_592_000; // 30 days — cf_clearance actually lasts months, no need to expire sooner
+const RATE_LIMIT_KEY = 'rate_limited_until';
 const CONFIG_KEY = 'autopilot_config';
 const SCANS_KEY = 'autopilot_scans';
 const HEARTBEAT_KEY = 'autopilot_heartbeat';
@@ -192,13 +193,59 @@ async function countAutoUnassigned(env) {
   return autoByGender;
 }
 
+// ---- Lightweight logging (Cloudflare only, no Supabase writes) --------------
+// The worker previously wrote an `info` row to Supabase `channel_logs` for
+// every autopilot candidate, which grew the table to ~1.5M rows / 700MB in
+// <18h and blew past Supabase usage limits. Logging now stays entirely inside
+// Cloudflare: structured console.log (visible in Workers logs / tail) plus a
+// small KV ring buffer (AUTOPILOT namespace) that auto-cleans itself.
+const CF_LOG_KEY = 'autopilot_log';
+const CF_LOG_MAX = 200; // ring buffer size — tiny by design
+
 async function logMany(env, entries) {
-  if (!entries.length) return;
-  try {
-    await sbPost(env, 'channel_logs', entries);
-  } catch (e) {
-    console.error('logMany failed:', e.message);
+  if (!entries || !entries.length) return;
+  for (const e of entries) {
+    const lvl = (e.log_level || 'info').toUpperCase();
+    const who = e.username && e.username !== '__autopilot__' ? ` [${e.username}]` : '';
+    console.log(`[autopilot:${lvl}]${who} ${e.message}`);
   }
+  try {
+    const prev = (await env.AUTOPILOT?.get(CF_LOG_KEY, { type: 'json' })) || [];
+    const arr = Array.isArray(prev) ? prev : [];
+    for (const e of entries) {
+      arr.unshift({
+        t: new Date().toISOString(),
+        level: e.log_level || 'info',
+        user: e.username || null,
+        msg: e.message,
+      });
+    }
+    while (arr.length > CF_LOG_MAX) arr.pop();
+    await env.AUTOPILOT?.put(CF_LOG_KEY, JSON.stringify(arr));
+  } catch (e) {
+    console.error('cf log buffer write failed:', e.message);
+  }
+}
+
+// Keep the KV log buffer bounded (autoclean). Called after each scan.
+async function trimChannelLogs(env) {
+  try {
+    const prev = await env.AUTOPILOT?.get(CF_LOG_KEY, { type: 'json' });
+    const arr = Array.isArray(prev) ? prev : [];
+    if (arr.length > CF_LOG_MAX) {
+      arr.length = CF_LOG_MAX;
+      await env.AUTOPILOT?.put(CF_LOG_KEY, JSON.stringify(arr));
+    }
+  } catch (e) {
+    console.error('trimChannelLogs failed:', e.message);
+  }
+}
+
+// ---- Cookie helpers ----------------------------------------------------------
+/** Convert Puppeteer cookie array ({name, value, ...}[]) to a Cookie header string. */
+function cookiesToHeader(cookies) {
+  if (!Array.isArray(cookies) || cookies.length === 0) return '';
+  return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 }
 
 // ---- Chaturbate fetch -------------------------------------------------------
@@ -259,6 +306,57 @@ async function saveCachedSession(env, cookies) {
     console.error('saveCachedSession failed:', e.message);
   }
 }
+
+// ---- Rate-limit backoff (429) -----------------------------------------------
+/**
+ * Check whether Browser Rendering rate limiting is active until the next UTC
+ * day. Uses KV so the backoff persists across worker restarts and survives
+ * global-scale cold starts.
+ */
+async function isRateLimited(env) {
+  try {
+    if (!env.AUTOPILOT) return false;
+    const until = await env.AUTOPILOT.get(RATE_LIMIT_KEY);
+    if (!until) return false;
+    return Date.now() < Number(until);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Persist a rate-limit backoff until the next UTC midnight. The KV entry is
+ * given an expirationTtl so it auto-cleans without manual housekeeping.
+ */
+async function setRateLimited(env) {
+  try {
+    if (!env.AUTOPILOT) return;
+    const now = new Date();
+    const nextMidnight = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0)
+    );
+    const ttlSeconds = Math.ceil((nextMidnight.getTime() - now.getTime()) / 1000);
+    await env.AUTOPILOT.put(RATE_LIMIT_KEY, String(nextMidnight.getTime()), {
+      expirationTtl: ttlSeconds,
+    });
+    console.log(`rate-limit backoff set until ${nextMidnight.toISOString()} (ttl=${ttlSeconds}s)`);
+  } catch (e) {
+    console.error('setRateLimited failed:', e.message);
+  }
+}
+
+/**
+ * Clear rate-limit backoff (called after a successful browser launch following
+ * a prior rate-limit period).
+ */
+async function clearRateLimited(env) {
+  try {
+    if (!env.AUTOPILOT) return;
+    await env.AUTOPILOT.delete(RATE_LIMIT_KEY);
+    console.log('rate-limit backoff cleared (browser launch succeeded)');
+  } catch (_) {}
+}
+// ---- End rate-limit helpers -------------------------------------------------
 
 // ---- Heartbeat / stale / metrics -------------------------------------------
 async function writeHeartbeat(env, method) {
@@ -346,22 +444,6 @@ async function runScan(env, dryrun = false) {
 
   const startedAt = Date.now();
   let browser = null;
-  if (env.BROWSER) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        browser = await puppeteer.launch(env.BROWSER);
-        break;
-      } catch (e) {
-        const msg = `browser launch attempt ${attempt + 1} failed: ${e.message}`;
-        result.errors.push(msg);
-        await logMany(env, [{ username: '__autopilot__', log_level: 'error', message: msg }]);
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 8000 * (attempt + 1)));
-      }
-    }
-    if (!browser) {
-      result.errors.push('all browser launch attempts failed; direct fetch fallback will be challenged');
-    }
-  }
 
   try {
     const autoByGender = await countAutoUnassigned(env).catch((e) => {
@@ -372,53 +454,112 @@ async function runScan(env, dryrun = false) {
     // Gather candidates per category (capped at the per-category deficit).
     const candidates = []; // {category, label, username, num_users}
     let page = null;
-    if (browser) {
-      page = await browser.newPage();
-      await page.setUserAgent(env.CB_USER_AGENT || DEFAULT_UA);
 
-      // Free-plan Workers allow only 50 external subrequests/invocation. The
-      // Chaturbate homepage pulls dozens of images/scripts/fonts, so block
-      // everything except the document, challenge scripts, and our XHR/fetch.
-      await page.setRequestInterception(true);
-      page.on('request', (req) => {
-        const t = req.resourceType();
-        if (t === 'document' || t === 'script' || t === 'xhr' || t === 'fetch') {
-          req.continue();
-        } else {
-          req.abort().catch(() => {});
-        }
-      });
-
-      const cached = await loadCachedSession(env);
-      if (cached?.cookies?.length) {
-        try {
-          await page.setCookie(...cached.cookies);
-        } catch (_) {
-          /* ignore bad cookies, page will re-solve */
-        }
-      }
-      await page
-        .goto(env.CB_DOMAIN + '/', { waitUntil: 'domcontentloaded', timeout: 30000 })
-        .catch(() => {});
-    }
+    // ---- Phase 1: Try direct fetch WITH cached KV cookies (no browser) -------
+    const cached = await loadCachedSession(env);
+    let directFetchedAll = false;
+    const topsByCategory = {}; // { catKey: [room, ...] }
 
     for (const cat of cfg.categories) {
-      const deficit = Math.max(0, cat.target_buffer - (autoByGender[cat.label] || 0));
-      let top = [];
       try {
-        const data = browser
-          ? await fetchRoomList(page, cat.key, env)
-          : await chaturbateFetchDirect(roomListUrl(cat.key, env), env);
-        top = topRooms(data, cfg.min_viewers);
+        const data = await chaturbateFetchDirect(
+          roomListUrl(cat.key, env),
+          env,
+          cached?.cookies
+        );
+        topsByCategory[cat.key] = topRooms(data, cfg.min_viewers);
       } catch (e) {
-        result.blocked = result.blocked || e instanceof BlockedError;
-        const msg = `autopilot scan failed for ${cat.label}: ${e.message}`;
-        result.errors.push(msg);
-        await logMany(env, [{ username: '__autopilot__', log_level: 'error', message: msg }]);
-        await alert(env, msg);
-        continue;
+        topsByCategory[cat.key] = null;
+        if (!env.BROWSER) {
+          // No browser fallback — this is a final error.
+          result.blocked = result.blocked || e instanceof BlockedError;
+          result.errors.push(`autopilot scan failed for ${cat.label}: ${e.message}`);
+        } else {
+          // Browser may still recover — only log to avoid polluting result.errors.
+          console.error(`direct cache fetch failed for ${cat.label}: ${e.message}`);
+        }
       }
+    }
 
+    directFetchedAll = Object.values(topsByCategory).every((t) => t !== null);
+
+    if (directFetchedAll) {
+      result.method = 'direct_cache';
+    }
+
+    // ---- Phase 2: Browser fallback for categories direct fetch couldn't serve -
+    if (!directFetchedAll && env.BROWSER) {
+      if (await isRateLimited(env)) {
+        result.method = 'rate_limited';
+        const msg = 'rate limited (429) — skipping browser launch until next UTC day';
+        result.errors.push(msg);
+        await logMany(env, [{ username: '__autopilot__', log_level: 'warn', message: `autopilot: ${msg}` }]);
+      } else {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            browser = await puppeteer.launch(env.BROWSER);
+            await clearRateLimited(env);
+            break;
+          } catch (e) {
+            const is429 = e.message.includes('429');
+            const msg = `browser launch attempt ${attempt + 1} failed: ${e.message}`;
+            result.errors.push(msg);
+            await logMany(env, [{ username: '__autopilot__', log_level: 'error', message: msg }]);
+            if (is429) await setRateLimited(env);
+            if (attempt < 2) await new Promise((r) => setTimeout(r, 8000 * (attempt + 1)));
+          }
+        }
+
+        if (browser) {
+          result.method = 'browser';
+          page = await browser.newPage();
+          await page.setUserAgent(env.CB_USER_AGENT || DEFAULT_UA);
+
+          await page.setRequestInterception(true);
+          page.on('request', (req) => {
+            const t = req.resourceType();
+            if (t === 'document' || t === 'script' || t === 'xhr' || t === 'fetch') {
+              req.continue();
+            } else {
+              req.abort().catch(() => {});
+            }
+          });
+
+          if (cached?.cookies?.length) {
+            try {
+              await page.setCookie(...cached.cookies);
+            } catch (_) {
+              /* ignore bad cookies, page will re-solve */
+            }
+          }
+          await page
+            .goto(env.CB_DOMAIN + '/', { waitUntil: 'domcontentloaded', timeout: 30000 })
+            .catch(() => {});
+
+          for (const cat of cfg.categories) {
+            try {
+              const data = await fetchRoomList(page, cat.key, env);
+              topsByCategory[cat.key] = topRooms(data, cfg.min_viewers);
+            } catch (e) {
+              result.blocked = result.blocked || e instanceof BlockedError;
+              const msg = `browser scan failed for ${cat.label}: ${e.message}`;
+              result.errors.push(msg);
+              await logMany(env, [{ username: '__autopilot__', log_level: 'error', message: msg }]);
+              await alert(env, msg);
+            }
+          }
+        } else {
+          result.errors.push('browser not available; direct fetch fallback results are partial');
+        }
+      }
+    }
+
+    // ---- Phase 3: Build candidates from whatever topsByCategory we have -------
+    for (const cat of cfg.categories) {
+      const top = topsByCategory[cat.key];
+      if (!top || !Array.isArray(top)) continue;
+
+      const deficit = Math.max(0, cat.target_buffer - (autoByGender[cat.label] || 0));
       const capped = top.slice(0, deficit);
       result[cat.label] = capped.map((r) => ({ username: r.username, num_users: r.num_users }));
       for (const r of capped) {
@@ -426,7 +567,7 @@ async function runScan(env, dryrun = false) {
       }
     }
 
-    // Batch dedup: one query per source for ALL candidates at once.
+    // ---- Phase 4: Batch dedup + write -----------------------------------------
     const usernames = candidates.map((c) => c.username);
     const [inPoolSet, autoAddedSet, channelsSet] = await Promise.all([
       batchInPool(env, usernames),
@@ -437,8 +578,8 @@ async function runScan(env, dryrun = false) {
       return [new Set(), new Set(), new Set()];
     });
 
-    const addRows = []; // channel_assignments
-    const autoRows = []; // pool_autopilot
+    const addRows = [];
+    const autoRows = [];
     const logRows = [];
     for (const c of candidates) {
       let reason = null;
@@ -497,7 +638,7 @@ async function runScan(env, dryrun = false) {
       }
     }
 
-    // Cache the freshly minted session for the next run.
+    // ---- Phase 5: Cache fresh cookies from browser run (if any) ----------------
     if (page) {
       try {
         const cookies = await page.cookies();
@@ -524,6 +665,7 @@ async function runScan(env, dryrun = false) {
   }
 
   result.duration_ms = Date.now() - startedAt;
+  if (!dryrun) await trimChannelLogs(env);
   await recordScan(env, {
     ran_at: new Date().toISOString(),
     method: result.method,
@@ -540,8 +682,15 @@ async function runScan(env, dryrun = false) {
   return result;
 }
 
-// Direct fetch (fallback only; will normally be challenged without a browser).
-async function chaturbateFetchDirect(url, env) {
+/**
+ * Direct fetch to Chaturbate's roomlist API. Merges cookies from:
+ *   1. The static `CB_COOKIES` secret (seed/fallback)
+ *   2. The KV-cached puppet session (fresh cf_clearance from last browser run)
+ *
+ * When called without cached cookies this degrades to the static secret only
+ * (same behaviour as before). Pass `cachedCookies` from `loadCachedSession()`.
+ */
+async function chaturbateFetchDirect(url, env, cachedCookies) {
   const headers = {
     'User-Agent': env.CB_USER_AGENT || DEFAULT_UA,
     Referer: env.CB_DOMAIN + '/',
@@ -549,7 +698,14 @@ async function chaturbateFetchDirect(url, env) {
     Accept: 'application/json, text/javascript, */*; q=0.01',
     'Accept-Language': 'en-US,en;q=0.9',
   };
-  if (env.CB_COOKIES) headers['Cookie'] = env.CB_COOKIES;
+
+  // Merge static secret + KV-cached cookies into a single Cookie header.
+  const parts = [];
+  if (env.CB_COOKIES) parts.push(env.CB_COOKIES);
+  const extra = cookiesToHeader(cachedCookies);
+  if (extra) parts.push(extra);
+  if (parts.length) headers['Cookie'] = parts.join('; ');
+
   const resp = await fetch(url, { headers, redirect: 'follow' });
   const ct = resp.headers.get('content-type') || '';
   if (resp.status >= 400 || ct.includes('text/html')) {
