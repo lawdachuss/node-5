@@ -247,15 +247,19 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		}
 	}()
 
-	// ── Sprite sheet (4×4 grid covering the full video duration) ───────────
+	// ── Sprite sheet (4×4 grid from a short contiguous window) ─────────────
 	// Each frame is spriteFrameW×spriteFrameH px; total image is
 	// (spriteCols*spriteFrameW) × (spriteRows*spriteFrameH) = 2560×1440.
 	// Using 640×360 frames so HiDPI/Retina displays get sharp previews.
 	//
+	// All 16 frames are sampled from a ~16-second contiguous window near the
+	// start of the video so cycling the sprite reads as smooth motion (like
+	// the MP4 preview) instead of a slow jumpy slideshow.
+	//
 	// Uses input seeking (-ss before -i): ffmpeg jumps to each of the 16
-	// evenly-spaced positions and reads a single frame, so generation is
-	// O(frames) not O(video_duration).  The 15-minute context is a generous
-	// ceiling for very slow/resource-constrained hosts, not a typical cost.
+	// positions and reads a single frame, so generation is O(frames) not
+	// O(video_duration).  The 15-minute context is a generous ceiling for
+	// very slow/resource-constrained hosts, not a typical cost.
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -282,8 +286,16 @@ func generateThumbnailForFile(videoPath string, info, errFn func(string, ...inte
 		var err error
 		if dur > 0 {
 			args := []string{"-y"}
+			// Sample all 16 frames from a short contiguous window near the
+			// start so cycling the sprite reads as smooth motion rather than
+			// a slow jumpy slideshow of frames minutes apart.
+			window := 16.0
+			if dur < window {
+				window = dur
+			}
+			step := window / float64(spriteFrames)
 			for i := 0; i < spriteFrames; i++ {
-				t := (float64(i) + 0.5) / float64(spriteFrames) * dur
+				t := (float64(i) + 0.5) * step
 				if t > dur-0.04 {
 					t = dur - 0.04
 				}
