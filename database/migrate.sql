@@ -739,10 +739,21 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   RETURN QUERY
+  WITH link_data AS (
+    SELECT 
+      (elem->>'recording_id')::UUID AS recording_id,
+      elem->>'host' AS host,
+      elem->>'url' AS url,
+      COALESCE(elem->>'instance_id', 'default') AS instance_id
+    FROM jsonb_array_elements(p_links) AS elem
+  )
   INSERT INTO upload_links (recording_id, host, url, instance_id)
-  SELECT (elem->>'recording_id')::UUID, elem->>'host', elem->>'url', COALESCE(elem->>'instance_id', 'default')
-  FROM jsonb_array_elements(p_links) AS elem
-  ON CONFLICT (recording_id, host) DO UPDATE SET url = EXCLUDED.url, uploaded_at = NOW()
+  SELECT recording_id, host, url, instance_id
+  FROM link_data
+  ON CONFLICT (recording_id, host) 
+  DO UPDATE SET 
+    url = EXCLUDED.url, 
+    uploaded_at = NOW()
   RETURNING *;
 END;
 $$;

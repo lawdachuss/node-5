@@ -746,6 +746,23 @@ func startTunnel(port string) {
 	case tunnelURL := <-tunnelURLCh:
 		fmt.Printf("🌍 Public: %s\n\n", tunnelURL)
 		fmt.Printf("::notice title=Web UI::%s\n", tunnelURL)
+		
+		// Auto-register tunnel URL with database
+		go func() {
+			// Give the server a moment to start
+			time.Sleep(3 * time.Second)
+			
+			runID := 0
+			if rid := os.Getenv("GITHUB_RUN_ID"); rid != "" {
+				fmt.Sscanf(rid, "%d", &runID)
+			}
+			
+			if err := server.SaveTunnelToDB(tunnelURL, runID); err != nil {
+				fmt.Printf("⚠️  Failed to register tunnel in database: %v\n", err)
+			} else {
+				fmt.Printf("✓ Tunnel URL registered in database\n")
+			}
+		}()
 	case <-time.After(60 * time.Second):
 		fmt.Println("⚠️  Tunnel URL not obtained within 60s")
 	}
