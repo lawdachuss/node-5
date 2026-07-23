@@ -6,7 +6,6 @@ import (
 	"hash/fnv"
 	"log"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/teacat/chaturbate-dvr/database"
@@ -139,37 +138,49 @@ func (c *Coordinator) runClaimCycle() {
 	if totalNodes == 0 {
 		totalNodes = 1
 	}
-	// In pooled mode, assume at least 2 nodes to prevent one node from claiming
-	// everything before other nodes register their heartbeats.
-	if strings.HasPrefix(c.NodeID, "node-") && totalNodes < 2 {
-		totalNodes = 2
-	}
-	// Fair-share is based on the total pool, not live-channel count.  A DVR is
-	// expected to claim channels that are offline at claim time and record them
-	// when they go live, so all pool channels count toward distribution.  Using
-	// live-channel count would zero out fair-share whenever the liveness loop
-	// (every ~120s) hasn't run, starving all claims.
+
 	fairShare := int(math.Ceil(float64(totalPool) / float64(totalNodes)))
 
-	myLoad, err := c.Client.CountMyAssignments(c.NodeID)
-	if err != nil {
-		log.Printf("[coordinator] claim cycle: count error: %v", err)
-		return
+	// Count live vs offline assignments from the already-fetched dbAssignments.
+	// This avoids a redundant CountMyAssignments call and lets us do live-aware
+	// fair-share: live channels consume a node's capacity, so a node with many
+	// live channels claims fewer offline ones.
+	myLiveCount := 0
+	myLoad := 0
+	for _, a := range dbAssignments {
+		if a.Status == "unassigned" {
+			continue
+		}
+		myLoad++
+		if a.IsLive || a.Status == "recording" {
+			myLiveCount++
+		}
 	}
 
-	// Release excess channels if we have more than our fair share.
-	// Only OFFLINE channels are released, so a live+recording channel is never
-	// interrupted just because its node is over fair-share.
-	if myLoad > fairShare && totalNodes > 1 {
-		excess := myLoad - fairShare
+	// Live-aware capacity: a node's live channels count against its fair-share.
+	// A node with 8 live channels and fairShare=10 gets at most 2 offline slots.
+	effectiveCapacity := fairShare
+	if myLiveCount > effectiveCapacity {
+		effectiveCapacity = myLiveCount // never release live channels
+	}
+	maxOfflineAllowed := effectiveCapacity - myLiveCount
+	if maxOfflineAllowed < 0 {
+		maxOfflineAllowed = 0
+	}
+	myOfflineCount := myLoad - myLiveCount
+
+	// Release excess OFFLINE channels if we have more offline than allowed.
+	// Live+recording channels are NEVER released here.
+	if myOfflineCount > maxOfflineAllowed && totalNodes > 1 {
+		excess := myOfflineCount - maxOfflineAllowed
 		released, err := c.Client.ReleaseExcessOfflineChannels(c.NodeID, excess)
 		if err != nil {
 			log.Printf("[coordinator] claim cycle: release excess error: %v", err)
 			return
 		}
 		if len(released) > 0 {
-			log.Printf("[coordinator] released %d excess channel(s) (load: %d -> %d, fairShare: %d, totalPool: %d)",
-				len(released), myLoad, myLoad-len(released), fairShare, totalPool)
+			log.Printf("[coordinator] released %d excess offline channel(s) (offline: %d -> %d, live: %d, fairShare: %d, totalPool: %d)",
+				len(released), myOfflineCount, myOfflineCount-len(released), myLiveCount, fairShare, totalPool)
 			for _, ca := range released {
 				if c.Manager != nil {
 					c.Manager.RemoveChannelForReassignment(ca.Username)
@@ -179,17 +190,17 @@ func (c *Coordinator) runClaimCycle() {
 		return // let next cycle do the claiming to avoid races
 	}
 
-	// Claim channels if we have fewer than our fair share
-	if myLoad < fairShare {
-		budget := fairShare - myLoad
+	// Claim offline channels up to our maxOfflineAllowed budget
+	if myOfflineCount < maxOfflineAllowed {
+		budget := maxOfflineAllowed - myOfflineCount
 		claimed, err := c.Client.ClaimChannels(c.NodeID, budget)
 		if err != nil {
 			log.Printf("[coordinator] claim cycle: claim error: %v", err)
 			return
 		}
 		if len(claimed) > 0 {
-			log.Printf("[coordinator] claimed %d new channel(s) (load: %d -> %d, fairShare: %d, totalPool: %d)",
-				len(claimed), myLoad, myLoad+len(claimed), fairShare, totalPool)
+			log.Printf("[coordinator] claimed %d new channel(s) (offline: %d -> %d, live: %d, fairShare: %d, totalPool: %d)",
+				len(claimed), myOfflineCount, myOfflineCount+len(claimed), myLiveCount, fairShare, totalPool)
 			for _, ca := range claimed {
 				if c.Manager != nil {
 					if err := c.Manager.CreateChannelFromAssignment(&ca); err != nil {
@@ -199,6 +210,25 @@ func (c *Coordinator) runClaimCycle() {
 			}
 		}
 	}
+}
+
+// RebalanceAtSessionBoundary is called at session boundaries (after uploads
+// complete, before resume). It releases this node's DB assignments and triggers
+// a fresh claim cycle so the pool is redistributed evenly across all nodes.
+// All nodes hit the session boundary at roughly the same time (same cron/SESSION_DURATION),
+// so each releases its channels, and then each node claims a random fair share.
+func (c *Coordinator) RebalanceAtSessionBoundary() {
+	if !c.IsPooled() || c.Client == nil {
+		return
+	}
+	log.Printf("[coordinator] session boundary — releasing %s assignments and rebalancing", c.NodeID)
+
+	if err := c.Client.ReleaseNodeChannels(c.NodeID); err != nil {
+		log.Printf("[coordinator] rebalance: release error: %v", err)
+		return
+	}
+	log.Printf("[coordinator] rebalance: assignments released, running fresh claim cycle")
+	c.runClaimCycle()
 }
 
 // CreateChannelAssignment creates a channel_assignments row for a new channel.

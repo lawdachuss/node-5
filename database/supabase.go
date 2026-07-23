@@ -2,6 +2,7 @@ package database
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,7 +32,7 @@ func NewClient(url, apiKey string) *Client {
 // HTTP HELPERS
 // ============================================================================
 
-func (c *Client) request(method, path string, body interface{}) (*http.Response, error) {
+func (c *Client) request(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -41,7 +42,7 @@ func (c *Client) request(method, path string, body interface{}) (*http.Response,
 		bodyReader = bytes.NewReader(jsonData)
 	}
 
-	req, err := http.NewRequest(method, c.URL+"/rest/v1"+path, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, c.URL+"/rest/v1"+path, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -56,15 +57,25 @@ func (c *Client) request(method, path string, body interface{}) (*http.Response,
 	return c.client.Do(req)
 }
 
-// requestWithRetry executes the request and retries on transient errors:
+// requestWithRetryCtx executes the request with a context and retries on transient errors:
 // - 503 PGRST002 — schema cache rebuilding after migration
 // - 400 PGRST204 — column not in schema cache yet (PostgREST needs to refresh)
-func (c *Client) requestWithRetry(method, path string, body interface{}) (*http.Response, error) {
+func (c *Client) requestWithRetryCtx(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
 	const maxRetries = 3
 	var lastErr error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, err := c.request(method, path, body)
+		// Check context before each attempt
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context cancelled before attempt %d/%d: %w", attempt+1, maxRetries, err)
+		}
+
+		resp, err := c.request(ctx, method, path, body)
+
+		// Context deadline exceeded takes priority over transport errors
+		if err != nil && ctx.Err() != nil {
+			return nil, fmt.Errorf("request aborted by context: %w", ctx.Err())
+		}
 		if err != nil {
 			lastErr = err
 			if attempt < maxRetries-1 {
@@ -122,6 +133,14 @@ func (c *Client) requestWithRetry(method, path string, body interface{}) (*http.
 	}
 
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+// requestWithRetry wraps requestWithRetryCtx with a 45-second total deadline
+// so goroutines cannot hang for >194s (3 retries × 60s client timeout + backoff).
+func (c *Client) requestWithRetry(method, path string, body interface{}) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return c.requestWithRetryCtx(ctx, method, path, body)
 }
 
 func retryBackoff(attempt int) time.Duration {
@@ -1428,7 +1447,7 @@ func joinEscaped(items []string) string {
 
 // HealthCheck verifies the database connection
 func (c *Client) HealthCheck() error {
-	resp, err := c.request("GET", "/app_settings?key=eq.__healthcheck__&select=key&limit=1", nil)
+	resp, err := c.request(context.Background(), "GET", "/app_settings?key=eq.__healthcheck__&select=key&limit=1", nil)
 	if err != nil {
 		return fmt.Errorf("health check request failed: %w", err)
 	}

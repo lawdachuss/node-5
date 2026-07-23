@@ -40,7 +40,7 @@ import puppeteer from '@cloudflare/puppeteer';
 
 // ---- Defaults (used until autopilot_config exists in app_settings) ----------
 const DEFAULT_CONFIG = {
-  min_viewers: 5000,
+  min_viewers: 20000,
   target_buffer: 10,
   categories: [
     { key: 'f', label: 'female', target_buffer: 1 },

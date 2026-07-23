@@ -29,7 +29,7 @@ worker self-seeds defaults on first run):
 
 ```json
 {
-  "min_viewers": 5000,
+  "min_viewers": 20000,
   "target_buffer": 10,
   "categories": [{ "key": "f", "label": "female" }, { "key": "c", "label": "couple" }],
   "stale_minutes": 25

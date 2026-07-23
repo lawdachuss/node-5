@@ -276,7 +276,6 @@ var REPO_CONFIGS = [
   { repo: "node-8", workflow: "secure-rdp.yml", branch: "main" },
   { repo: "node-9", workflow: "secure-rdp.yml", branch: "main" },
   { repo: "node-10", workflow: "secure-rdp.yml", branch: "main" },
-  { repo: "backfill", workflow: "backfill.yml", branch: "master" }
 ];
 var OWNER = "lawdachuss";
 var GRACE_PERIOD = 20 * 60 * 1e3;
@@ -392,7 +391,7 @@ __name(evaluateRepo, "evaluateRepo");
 async function executeRestart(config, state, headers, env) {
   const { repo, workflow, branch } = config;
   console.log(`[${repo}] restarting \u2014 ${state.reason}`);
-  const body = repo === "backfill" ? JSON.stringify({ ref: branch }) : JSON.stringify({ ref: branch, inputs: { triggered_by: "workflow-watchman" } });
+  const body = JSON.stringify({ ref: branch, inputs: { triggered_by: "workflow-watchman" } });
   const dispatchResp = await fetch(
     `https://api.github.com/repos/${OWNER}/${repo}/actions/workflows/${workflow}/dispatches`,
     {

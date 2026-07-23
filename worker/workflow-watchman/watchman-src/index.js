@@ -1,13 +1,11 @@
 /**
  * workflow-watchman — Cloudflare Worker
  * ---------------------------------------
- * Monitors GitHub Actions workflows across node-1..node-10 and backfill repos.
+ * Monitors GitHub Actions workflows across node-1..node-10 repos.
  * Restarts any workflow that has been inactive/dead longer than its grace period.
  *
  * Repo-specific behaviour:
  *   - node-1..node-10 (secure-rdp.yml):  20 min grace,  8 restarts / 24h max
- *   - backfill (backfill.yml):             0 min grace  (immediate restart on completion)
- *                                          no throttle (unlimited restarts)
  */
 
 const OWNER = "lawdachuss";
@@ -25,8 +23,6 @@ const REPO_CONFIGS = [
   { repo: "node-8",   workflow: "secure-rdp.yml", branch: "main", graceMs: 20 * 60 * 1000, throttleMax: 8 },
   { repo: "node-9",   workflow: "secure-rdp.yml", branch: "main", graceMs: 20 * 60 * 1000, throttleMax: 8 },
   { repo: "node-10",  workflow: "secure-rdp.yml", branch: "main", graceMs: 20 * 60 * 1000, throttleMax: 8 },
-  // Backfill — immediate restart, no throttle
-  { repo: "backfill", workflow: "backfill.yml",   branch: "master", graceMs: 0, throttleMax: Infinity },
 ];
 
 const THROTTLE_WINDOW = 24 * 60 * 60 * 1000; // 24 hours
@@ -259,7 +255,7 @@ async function executeRestart(config, state, headers, env) {
 
   // Backfill dispatch needs just the ref; node repos pass extra inputs
   const body =
-    repo === "backfill"
+    false
       ? JSON.stringify({ ref: branch })
       : JSON.stringify({ ref: branch, inputs: { triggered_by: "workflow-watchman" } });
 

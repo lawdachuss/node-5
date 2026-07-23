@@ -145,16 +145,10 @@ func (c *Coordinator) runOfflineShuffleCycle() {
 		log.Printf("[coordinator] offline shuffle: get assignments error: %v", err)
 		return
 	}
-	// If this node has any locally running (recording) channels, skip the
-	// shuffle entirely. A node busy recording live broadcasts should not be
-	// moving channels around — that adds DB load and risks a recording gap if
-	// an offline channel happens to go live mid-migration.
+
 	localSet := make(map[string]bool)
 	for _, u := range c.Manager.GetLocalChannels() {
 		localSet[u] = true
-	}
-	if len(localSet) > 0 {
-		return
 	}
 
 	var offline []database.ChannelAssignment
@@ -305,6 +299,15 @@ func (c *Coordinator) runDeadlineMigrationCycle() {
 		return
 	}
 
+	// Build a local load map so we spread channels across candidates instead
+	// of piling all onto the single initially-least-loaded node (the by-value
+	// bug where target.CurrentLoad++ modified a copy that was never reflected
+	// back into the candidates slice).
+	loadMap := make(map[string]int, len(candidates))
+	for _, n := range candidates {
+		loadMap[n.NodeID] = n.CurrentLoad
+	}
+
 	for _, imm := range imminent {
 		if imm.NodeID == c.NodeID {
 			log.Printf("[coordinator] deadline migration: this node's deadline is imminent — migrating channels away")
@@ -315,7 +318,7 @@ func (c *Coordinator) runDeadlineMigrationCycle() {
 			continue
 		}
 		for _, ca := range assignments {
-			target := leastLoaded(candidates)
+			target := leastLoadedFromMap(candidates, loadMap)
 			if target.NodeID == imm.NodeID {
 				continue
 			}
@@ -323,20 +326,22 @@ func (c *Coordinator) runDeadlineMigrationCycle() {
 				log.Printf("[coordinator] deadline migration: reassign %s from %s error: %v", ca.Username, imm.NodeID, err)
 				continue
 			}
-			// Bump the local view of the target's load so we spread channels
-			// across candidates instead of piling them on one node.
-			target.CurrentLoad++
+			loadMap[target.NodeID]++
 			log.Printf("[coordinator] deadline migration: moved %s/%s from %s -> %s", ca.Site, ca.Username, imm.NodeID, target.NodeID)
 		}
 	}
 }
 
-// leastLoaded returns the candidate node with the smallest current load.
-func leastLoaded(candidates []database.Node) database.Node {
+// leastLoadedFromMap returns the candidate node with the smallest current load
+// from the supplied load map. This is used by deadline migration to spread
+// channels across all candidates instead of piling them onto one node.
+func leastLoadedFromMap(candidates []database.Node, loadMap map[string]int) database.Node {
 	best := candidates[0]
+	bestLoad := loadMap[best.NodeID]
 	for _, n := range candidates[1:] {
-		if n.CurrentLoad < best.CurrentLoad {
+		if l := loadMap[n.NodeID]; l < bestLoad {
 			best = n
+			bestLoad = l
 		}
 	}
 	return best

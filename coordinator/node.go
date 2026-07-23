@@ -91,27 +91,28 @@ func (c *Coordinator) fence() {
 
 	log.Printf("[coordinator] PARTITION FENCE: DB unreachable %d times — stopping local recording and releasing channels to prevent duplicate capture", maxHeartbeatFailures)
 
+	// Stop local recording FIRST, unconditionally — even if DB is unreachable
+	// (which is the likely scenario when fencing due to heartbeat failure), we
+	// must stop recording to prevent duplicate capture. The DB cleanup below is
+	// best-effort.
+	if c.Manager != nil {
+		for _, username := range c.Manager.GetLocalChannels() {
+			if err := c.Manager.RemoveChannelForReassignment(username); err != nil {
+				log.Printf("[coordinator] fence: remove channel %s error: %v", username, err)
+			}
+		}
+	}
+
 	if c.Client != nil {
 		// Mark draining so the reaper won't try to reclaim and so no node
 		// assigns us new channels while we're fenced.
 		if err := c.Client.UpdateNodeStatus(c.NodeID, "draining"); err != nil {
 			log.Printf("[coordinator] fence: update status error: %v", err)
 		}
-		// Release DB assignments FIRST so the reconcile watchdog (which runs
-		// every 15s) sees them as unassigned and does NOT restart them locally
-		// between this step and the local stop below.
-		if c.Manager != nil {
-			if err := c.Client.ReleaseNodeChannels(c.NodeID); err != nil {
-				log.Printf("[coordinator] fence: release channels error: %v", err)
-			}
-		}
-	}
-
-	if c.Manager != nil {
-		for _, username := range c.Manager.GetLocalChannels() {
-			if err := c.Manager.RemoveChannelForReassignment(username); err != nil {
-				log.Printf("[coordinator] fence: remove channel %s error: %v", username, err)
-			}
+		// Release DB assignments (best-effort — will fail if DB is unreachable,
+		// but the reaper on another node will reclaim them after 180s).
+		if err := c.Client.ReleaseNodeChannels(c.NodeID); err != nil {
+			log.Printf("[coordinator] fence: release channels error: %v", err)
 		}
 	}
 }
